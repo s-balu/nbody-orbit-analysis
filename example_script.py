@@ -7,13 +7,12 @@ from orbitanalysis.funcs import load_halo_particle_ids_subfind, \
     load_snapshot_obj_subfind
 from orbitanalysis.track_orbits import track_orbits
 from orbitanalysis.collate import collate_orbit_history
-from orbitanalysis.postprocessing import read_orbiting_decomposition, \
-    plot_position_space, plot_phase_space
+from orbitanalysis.postprocessing import OrbitDecomposition
 
 ###############################################################################
 
-snapshot_dir = 'data/DM-L25-N128-eps0.004/snapshots'
-catalaogue_dir = 'data/DM-L25-N128-eps0.004/catalogues'
+snapshot_dir = 'path/to/snapshot/files'
+catalaogue_dir = 'path/to/catalogue/files'
 snapshot_filename = 'snapshot_{}.hdf5'
 catalogue_filename = 'fof_subhalo_tab_{}.hdf5'
 read_mode = 1
@@ -68,10 +67,20 @@ track_orbits(load_halo_particle_ids_subfind, load_snapshot_obj_subfind,
 
 collate_orbit_history(savefile_onthefly, savefile)
 
-IDS, COORDS, VELS, MASSES, counts = read_orbiting_decomposition(
-    savefile, 48, 0, angle_condition=np.pi/2, filter_ids=None)
+# post-processing
+orb_decomp = OrbitDecomposition(savefile)
+orb_decomp.correct_counts_and_save_to_file(angle_condition=np.pi/2)
+orb_decomp.get_halo_decomposition_at_snapshot(
+    snapshot_number=48, halo_index=0, use_corrected=False,
+    angle_condition=np.pi/2)
+orb_decomp.datafile.close()
 
-plot_position_space(COORDS, counts, colormap='inferno_r',
-                    savefile=savedir + '/position_space.png')
-plot_phase_space(COORDS, VELS, counts, colormap='inferno_r',
-                 savefile=savedir + '/phase_space.png')
+# plotting
+orb_decomp.plot_position_space(
+    projection='xy', colormap='inferno_r', counts_to_plot='all',
+    xlabel=r'$x/R_{200}$', ylabel=r'$y/R_{200}$', display=False,
+    savefile=savedir + '/position_space.png')
+orb_decomp.plot_phase_space(
+    colormap='inferno_r', counts_to_plot='all', radius_label=r'$r/R_{200}$',
+    radial_velocity_label=r'$v_r\,\,({\rm km\, s}^{-1})$', display=False,
+    savefile=savedir + '/phase_space.png')

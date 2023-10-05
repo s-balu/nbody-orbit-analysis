@@ -7,281 +7,376 @@ from matplotlib.ticker import MaxNLocator
 from orbitanalysis.utils import myin1d, magnitude
 
 
-def filter_pericenters(hf, index, angle_condition=np.pi/2,
-                       final_snapshot=None):
+class OrbitDecomposition:
 
-    snapshot_numbers = hf['SnapshotNumbers'][:]
-    if final_snapshot is not None:
-        snap_ind = np.where(snapshot_numbers == final_snapshot)[0][0]
-        snapshot_numbers = snapshot_numbers[:snap_ind+1]
+    def __init__(self, filename):
 
-    peri_ids = []
-    peri_angles = []
-    for ii, snapshot_number in enumerate(snapshot_numbers):
-        sdata = hf['Snapshot{}'.format('%0.3d' % snapshot_number)]
+        self.datafile = h5py.File(filename, 'r+')
+
+        self.halo_indices = self.datafile['HaloIndices'][:]
+        if 'ParticleMasses' in self.datafile:
+            self.particle_masses = self.datafile['ParticleMasses']
+        self.halo_positions = self.datafile['Positions'][:]
+        self.halo_radii = self.datafile['Radii'][:]
+        self.redshifts = self.datafile['Redshifts'][:]
+        self.snapshot_numbers = self.datafile['SnapshotNumbers'][:]
+
+        self.number_of_radii = self.datafile['Options'].attrs['NumRadii']
+        self.particle_type = self.datafile['Options'].attrs['PartType']
+        self.snapshot_directory = self.datafile['Options'].attrs['SnapDir']
+
+    def correct_counts_and_save_to_file(self, angle_condition=np.pi/2):
+
+        for halo_index in range(len(self.halo_indices[0])):
+            self.correct_counts(halo_index, angle_condition, save_to_file=True)
+
+    def correct_counts(self, halo_index, angle_condition=np.pi/2,
+                       snapshot_number=None, filtered_ids=None,
+                       save_to_file=False):
+
+        if filtered_ids is None:
+            filtered_ids = self.filter_pericenters(
+                halo_index, angle_condition, final_snapshot=snapshot_number)
+
+        if snapshot_number is None:
+            no_progen = np.count_nonzero(
+                self.halo_indices[:, halo_index] == -1)
+            snapshot_numbers = self.snapshot_numbers[no_progen:]
+        else:
+            snapshot_numbers = np.array([snapshot_number])
+
+        for snap_num in snapshot_numbers:
+
+            if snapshot_number is None:
+                snap_ind = np.where(snapshot_numbers == snap_num)[0][0]
+                filtered_ids_snap = np.concatenate(filtered_ids[:snap_ind + 1])
+            else:
+                filtered_ids_snap = np.concatenate(filtered_ids)
+
+            filtered_ids_unique, filter_counts = np.unique(
+                filtered_ids_snap, return_counts=True)
+
+            sdata = self.datafile[
+                'Snapshot{}'.format('%0.3d' % snap_num)]
+            orb_offsets = sdata['OrbitingOffsets'][()]
+            inf_offsets = sdata['InfallingOffsets'][()]
+            orb_ranges = list(zip(orb_offsets[:-1], inf_offsets))
+            counts_offsets = np.hstack([[0], np.cumsum(
+                inf_offsets - orb_offsets[:-1])])
+            count_ranges = list(
+                zip(counts_offsets[:-1], counts_offsets[1:]))
+
+            orb_slice = slice(*orb_ranges[halo_index])
+            count_slice = slice(*count_ranges[halo_index])
+
+            ids_orb = sdata['IDs'][orb_slice]
+
+            departed = np.setdiff1d(
+                filtered_ids_unique, ids_orb, assume_unique=True)
+            departed_inds = myin1d(filtered_ids_unique, departed)
+            filter_ids_unique_ = np.delete(
+                filtered_ids_unique, departed_inds)
+            filter_counts_ = np.delete(filter_counts, departed_inds)
+            inds_filter = myin1d(ids_orb, filter_ids_unique_)
+
+            if save_to_file:
+                if 'CountsCorrected' not in sdata:
+                    sdata.create_dataset(
+                        'CountsCorrected', data=sdata['Counts'][:])
+
+                counts_corrected = np.copy(
+                    sdata['CountsCorrected'][count_slice][inds_filter])
+                counts_corrected -= filter_counts_
+                counts_corrected[counts_corrected < 0] = 0
+
+                sdata['CountsCorrected'][count_slice][inds_filter] = \
+                    counts_corrected
+            else:
+                counts = np.copy(sdata['Counts'][count_slice])
+                counts[inds_filter] -= filter_counts_
+                counts[counts < 0] = 0
+                return counts
+
+    def filter_pericenters(self, halo_index, angle_condition,
+                           final_snapshot=None):
+
+        no_progen = np.count_nonzero(self.halo_indices[:, halo_index] == -1)
+        snapshot_numbers = self.snapshot_numbers[no_progen:]
+
+        if final_snapshot is not None:
+            snap_ind = np.where(snapshot_numbers == final_snapshot)[0][0]
+            snapshot_numbers = snapshot_numbers[:snap_ind+1]
+
+        peri_ids = []
+        peri_angles = []
+        for ii, snapshot_number in enumerate(snapshot_numbers):
+            sdata = self.datafile[
+                'Snapshot{}'.format('%0.3d' % snapshot_number)]
+
+            orb_offsets = sdata['OrbitingOffsets'][()]
+            inf_offsets = sdata['InfallingOffsets'][()]
+            orb_ranges = list(zip(orb_offsets[:-1], inf_offsets))
+            counts_offsets = np.hstack([[0], np.cumsum(
+                inf_offsets - orb_offsets[:-1])])
+            count_ranges = list(zip(counts_offsets[:-1], counts_offsets[1:]))
+
+            orb_slice = slice(*orb_ranges[halo_index])
+            count_slice = slice(*count_ranges[halo_index])
+
+            ids_orb = sdata['IDs'][orb_slice]
+            angles_orb = sdata['PhaseAngles'][orb_slice]
+            counts = sdata['Counts'][count_slice]
+            if ii > 0:
+                departed = np.setdiff1d(ids_orb_prev, ids_orb)
+                departed_inds = np.in1d(ids_orb_prev, departed)
+                ids_orb_prev_ = np.delete(ids_orb_prev, departed_inds)
+                counts_prev_ = np.delete(counts_prev, departed_inds)
+
+                matched_inds = myin1d(ids_orb, ids_orb_prev_)
+                first_peri_ids = np.setdiff1d(
+                    ids_orb, ids_orb_prev_, assume_unique=True)
+                first_peri_inds = myin1d(ids_orb, first_peri_ids)
+
+                peri_inds = np.where(counts[matched_inds] > counts_prev_)[0]
+                nth_peri_ids = ids_orb[matched_inds[peri_inds]]
+                new_peri_ids = np.concatenate([first_peri_ids, nth_peri_ids])
+                new_peri_inds = np.concatenate(
+                    [first_peri_inds, matched_inds[peri_inds]])
+                new_peri_angles = angles_orb[new_peri_inds]
+
+                peri_ids.append(new_peri_ids)
+                peri_angles.append(new_peri_angles)
+
+            ids_orb_prev = ids_orb
+            counts_prev = counts
+
+        filtered_ids = []
+        for ii in range(1, len(peri_ids)+1):
+            ids1, angles1 = peri_ids[-ii], peri_angles[-ii]
+            filter_ids_ii = []
+            for jj in range(ii+1, len(peri_ids)+1):
+                ids2, angles2 = peri_ids[-jj], peri_angles[-jj]
+
+                diff = np.setdiff1d(ids1, ids2)
+                diff_inds = myin1d(ids1, diff)
+                ids1_ = np.delete(ids1, diff_inds)
+                angles1_ = np.delete(angles1, diff_inds)
+                matched_inds = myin1d(ids2, ids1_)
+
+                filter_inds = np.where(
+                    (angles1_ - angles2[matched_inds]) < angle_condition)[0]
+                filter_ids_ii.append(ids1_[filter_inds])
+
+                ids1, angles1 = diff, angles1[diff_inds]
+
+            filter_inds_remaining = np.where(angles1 < angle_condition)[0]
+            filter_ids_ii.append(ids1[filter_inds_remaining])
+
+            filtered_ids.append(np.concatenate(filter_ids_ii))
+        filtered_ids.append(np.array([]))
+        filtered_ids = [
+            filtered_ids[-ii] for ii in range(1, len(filtered_ids)+1)]
+
+        return filtered_ids
+
+    def get_halo_decomposition_at_snapshot(self, snapshot_number, halo_index,
+                                           use_corrected=False,
+                                           angle_condition=None,
+                                           filtered_ids=None,
+                                           snapshot_data=None):
+
+        sdata = self.datafile['Snapshot{}'.format('%0.3d' % snapshot_number)]
 
         orb_offsets = sdata['OrbitingOffsets'][()]
         inf_offsets = sdata['InfallingOffsets'][()]
-        orb_ranges = list(zip(orb_offsets[:-1], inf_offsets))
         counts_offsets = np.hstack([[0], np.cumsum(
             inf_offsets - orb_offsets[:-1])])
-        count_ranges = list(zip(counts_offsets[:-1], counts_offsets[1:]))
+        orb_slices = list(zip(orb_offsets[:-1], inf_offsets))
+        inf_slices = list(zip(inf_offsets, orb_offsets[1:]))
+        count_slices = list(zip(counts_offsets[:-1], counts_offsets[1:]))
+        orb_slice = slice(*orb_slices[halo_index])
+        inf_slice = slice(*inf_slices[halo_index])
+        count_slice = slice(*count_slices[halo_index])
 
-        orb_slice = slice(*orb_ranges[index])
-        count_slice = slice(*count_ranges[index])
+        snap_ind = np.where(self.snapshot_numbers == snapshot_number)[0][0]
+        self.halo_radius = self.halo_radii[snap_ind, halo_index]
+        self.halo_position = self.halo_positions[snap_ind, halo_index]
+        self.redshift = self.redshifts[snap_ind]
+        if hasattr(self, 'particle_masses'):
+            particle_mass = self.particle_masses[snap_ind]
+            self.masses_orb = particle_mass
+            self.masses_inf = particle_mass
 
-        ids_orb = sdata['IDs'][orb_slice]
-        angles_orb = sdata['PhaseAngles'][orb_slice]
-        counts = sdata['Counts'][count_slice]
-        if ii > 0:
-            departed = np.setdiff1d(ids_orb_prev, ids_orb)
-            departed_inds = np.in1d(ids_orb_prev, departed)
-            ids_orb_prev_ = np.delete(ids_orb_prev, departed_inds)
-            counts_prev_ = np.delete(counts_prev, departed_inds)
-
-            matched_inds = myin1d(ids_orb, ids_orb_prev_)
-            first_peri_ids = np.setdiff1d(
-                ids_orb, ids_orb_prev_, assume_unique=True)
-            first_peri_inds = myin1d(ids_orb, first_peri_ids)
-
-            peri_inds = np.where(counts[matched_inds] > counts_prev_)[0]
-            nth_peri_ids = ids_orb[matched_inds[peri_inds]]
-            new_peri_ids = np.concatenate([first_peri_ids, nth_peri_ids])
-            new_peri_inds = np.concatenate(
-                [first_peri_inds, matched_inds[peri_inds]])
-            new_peri_angles = angles_orb[new_peri_inds]
-
-            peri_ids.append(new_peri_ids)
-            peri_angles.append(new_peri_angles)
-
-        ids_orb_prev = ids_orb
-        counts_prev = counts
-
-    filter_ids = []
-    for ii in range(1, len(peri_ids)+1):
-        ids1, angles1 = peri_ids[-ii], peri_angles[-ii]
-        filter_ids_ii = []
-        for jj in range(ii+1, len(peri_ids)+1):
-            ids2, angles2 = peri_ids[-jj], peri_angles[-jj]
-
-            diff = np.setdiff1d(ids1, ids2)
-            diff_inds = myin1d(ids1, diff)
-            ids1_ = np.delete(ids1, diff_inds)
-            angles1_ = np.delete(angles1, diff_inds)
-            matched_inds = myin1d(ids2, ids1_)
-
-            filter_inds = np.where(
-                (angles1_ - angles2[matched_inds]) < angle_condition)[0]
-            filter_ids_ii.append(ids1_[filter_inds])
-
-            ids1, angles1 = diff, angles1[diff_inds]
-
-        filter_inds_remaining = np.where(angles1 < angle_condition)[0]
-        filter_ids_ii.append(ids1[filter_inds_remaining])
-
-        filter_ids.append(np.concatenate(filter_ids_ii))
-    filter_ids.append(np.array([]))
-    filter_ids = [filter_ids[-ii] for ii in range(1, len(filter_ids)+1)]
-
-    return filter_ids
-
-
-def read_orbiting_decomposition(filename, snapshot_number, index,
-                                angle_condition=np.pi/2, filter_ids=None,
-                                position=None, snapshot=None):
-
-    hf = h5py.File(filename, 'r')
-    sdata = hf['Snapshot{}'.format('%0.3d' % snapshot_number)]
-
-    orb_offsets = sdata['OrbitingOffsets'][()]
-    inf_offsets = sdata['InfallingOffsets'][()]
-    counts_offsets = np.hstack([[0], np.cumsum(
-        inf_offsets - orb_offsets[:-1])])
-    orb_slices = list(zip(orb_offsets[:-1], inf_offsets))
-    inf_slices = list(zip(inf_offsets, orb_offsets[1:]))
-    count_slices = list(zip(counts_offsets[:-1], counts_offsets[1:]))
-    orb_slice = slice(*orb_slices[index])
-    inf_slice = slice(*inf_slices[index])
-    count_slice = slice(*count_slices[index])
-
-    if angle_condition > 0.0:
-        if filter_ids is None:
-            filter_ids = filter_pericenters(hf, index, angle_condition)
-        snap_ind = np.where(hf['SnapshotNumbers'][:] == snapshot_number)[0][0]
-        filter_ids_snap = np.concatenate(filter_ids[:snap_ind+1])
-        filter_ids_unique, filter_counts = np.unique(
-            filter_ids_snap, return_counts=True)
-
-    if 'ParticleMasses' in hf:
-        particle_mass = hf['ParticleMasses'][index]
-    else:
-        particle_mass = None
-
-    ids_orb = sdata['IDs'][orb_slice]
-    if snapshot is None:
-        coords_orb = sdata['Coordinates'][orb_slice]
-        vels_orb = sdata['Velocities'][orb_slice]
-        if 'Masses' in sdata:
-            masses_orb = sdata['Masses'][orb_slice]
+        self.ids_orb = sdata['IDs'][orb_slice]
+        if snapshot_data is None:
+            self.coords_orb = sdata['Coordinates'][orb_slice]
+            self.vels_orb = sdata['Velocities'][orb_slice]
+            if 'Masses' in sdata:
+                self.masses_orb = sdata['Masses'][orb_slice]
         else:
-            masses_orb = np.repeat(particle_mass, len(ids_orb))
-    else:
-        inds_orb = myin1d(snapshot.ids, ids_orb)
-        coords_orb = snapshot.coords[inds_orb] - position
-        vels_orb = snapshot.vels[inds_orb]
-        if isinstance(snapshot.masses, np.ndarray):
-            masses_orb = snapshot.masses[inds_orb]
+            self.inds_orb = myin1d(snapshot_data.ids, self.ids_orb)
+            self.coords_orb = snapshot_data.coords[self.inds_orb] - \
+                self.halo_position
+            self.vels_orb = snapshot_data.vels[self.inds_orb]
+            if isinstance(snapshot_data.masses, np.ndarray):
+                self.masses_orb = snapshot_data.masses[self.inds_orb]
+            else:
+                self.masses_orb = snapshot_data.masses
+
+        self.ids_inf = sdata['IDs'][inf_slice]
+        if snapshot_data is None:
+            self.coords_inf = sdata['Coordinates'][inf_slice]
+            self.vels_inf = sdata['Velocities'][inf_slice]
+            if 'Masses' in sdata:
+                self.masses_inf = sdata['Masses'][inf_slice]
         else:
-            masses_orb = np.repeat(snapshot.masses, len(ids_orb))
+            self.inds_inf = myin1d(snapshot_data.ids, self.ids_inf)
+            self.coords_inf = snapshot_data.coords[self.inds_inf] - \
+                self.halo_position
+            self.vels_inf = snapshot_data.vels[self.inds_inf]
+            if isinstance(snapshot_data.masses, np.ndarray):
+                self.masses_inf = snapshot_data.masses[self.inds_inf]
+            else:
+                self.masses_inf = snapshot_data.masses
 
-    ids_inf = sdata['IDs'][inf_slice]
-    if snapshot is None:
-        coords_inf = sdata['Coordinates'][inf_slice]
-        vels_inf = sdata['Velocities'][inf_slice]
-        if 'Masses' in sdata:
-            masses_inf = sdata['Masses'][inf_slice]
+        if not use_corrected and (
+                angle_condition > 0.0 or filtered_ids is not None):
+            self.raw_counts = sdata['Counts'][count_slice]
+            self.counts = self.correct_counts(
+                halo_index, angle_condition, snapshot_number,
+                filtered_ids=filtered_ids)
+        elif use_corrected:
+            self.raw_counts = sdata['Counts'][count_slice]
+            self.counts = sdata['CountsCorrected'][count_slice]
         else:
-            masses_inf = np.repeat(particle_mass, len(ids_inf))
-    else:
-        inds_inf = myin1d(snapshot.ids, ids_inf)
-        coords_inf = snapshot.coords[inds_inf] - position
-        vels_inf = snapshot.vels[inds_inf]
-        if isinstance(snapshot.masses, np.ndarray):
-            masses_inf = snapshot.masses[inds_inf]
+            self.counts = sdata['Counts'][count_slice]
+
+    def plot_position_space(self, projection='xy', colormap='inferno_r',
+                            counts_to_plot='all', xlabel=r'$x/R_{200}$',
+                            ylabel=r'$y/R_{200}$', display=False,
+                            savefile=None):
+
+        if counts_to_plot is 'all':
+            counts_to_plot = np.unique(self.counts)
+
+        clrmap = mpl.colormaps[colormap]
+
+        fig, axs = plt.subplots(
+            ncols=4, figsize=(22.5, 7), gridspec_kw={
+                'width_ratios': [20, 20, 20, 1]})
+        cbar_ax = axs[3]
+        norm = plt.Normalize(vmin=1, vmax=np.max(counts_to_plot))
+        mpl.colorbar.ColorbarBase(
+            cbar_ax, cmap=clrmap, norm=norm, orientation='vertical')
+        cbar_ax.set_title(r'$N_{\rm orbits}$', fontsize=18)
+        cbar_ax.tick_params(labelsize=18)
+        cbar_ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+
+        if projection == 'xy':
+            proj = [0, 1]
+        elif projection == 'yz':
+            proj = [1, 2]
+        elif projection == 'xz':
+            proj = [0, 2]
         else:
-            masses_inf = np.repeat(snapshot.masses, len(ids_inf))
+            raise ValueError(
+                "'projection' must be either 'xy', 'yz', or 'xz'.")
 
-    counts = sdata['Counts'][count_slice]
+        # orbiting & infalling
+        for ii in [0, 2]:
+            axs[ii].scatter(self.coords_inf[:, proj[0]]/self.halo_radius,
+                            self.coords_inf[:, proj[1]]/self.halo_radius,
+                            color='grey', alpha=0.4, marker='.', s=0.2)
+            zero_orb = np.where(self.counts == 0)[0]
+            axs[ii].scatter(self.coords_orb[zero_orb][:, proj[0]] /
+                            self.halo_radius,
+                            self.coords_orb[zero_orb][:, proj[1]] /
+                            self.halo_radius,
+                            color='grey', alpha=0.4, marker='.', s=0.2)
+        for ii in [0, 1]:
+            for n in counts_to_plot[counts_to_plot > 0]:
+                norb = np.where(self.counts == n)[0]
+                axs[ii].scatter(self.coords_orb[norb][:, proj[0]] /
+                                self.halo_radius,
+                                self.coords_orb[norb][:, proj[1]] /
+                                self.halo_radius,
+                                color=clrmap(norm(n-1)), alpha=0.4, marker='.',
+                                s=0.2)
 
-    if angle_condition > 0.0:
-        departed = np.setdiff1d(filter_ids_unique, ids_orb, assume_unique=True)
-        departed_inds = myin1d(filter_ids_unique, departed)
-        filter_ids_unique_ = np.delete(filter_ids_unique, departed_inds)
-        filter_counts_ = np.delete(filter_counts, departed_inds)
-        inds_filter = myin1d(ids_orb, filter_ids_unique_)
-        counts[inds_filter] -= filter_counts_
+        lim = max(np.abs(np.array(list(axs[0].get_xlim()) +
+                                  list(axs[0].get_ylim()))))
+        titles = ['orbiting + infalling', 'orbiting', 'infalling']
+        for ax, title in zip(axs, titles):
+            ax.set_xlim(-lim, lim)
+            ax.set_ylim(-lim, lim)
+            ax.set_xlabel(xlabel, fontsize=18)
+            ax.set_ylabel(ylabel, fontsize=18)
+            ax.tick_params(labelsize=18)
+            ax.set_title(title, fontsize=18)
+        fig.tight_layout()
 
-    ids_norb, coords_norb, vels_norb, masses_norb = {}, {}, {}, {}
-    norbs = np.unique(counts[counts > 0])
-    for n in norbs:
-        norb_inds = np.argwhere(counts == n).flatten()
-        ids_norb[n] = ids_orb[norb_inds]
-        coords_norb[n] = coords_orb[norb_inds]
-        vels_norb[n] = vels_orb[norb_inds]
-        masses_norb[n] = masses_orb[norb_inds]
+        if savefile is not None:
+            fig.savefig(savefile, dpi=300)
+        if display:
+            plt.show()
+        else:
+            plt.close(fig)
 
-    if angle_condition > 0.0:
-        inds_remove = np.argwhere(counts <= 0).flatten()
-        ids_inf = np.append(ids_inf, ids_orb[inds_remove])
-        coords_inf = np.append(coords_inf, coords_orb[inds_remove], axis=0)
-        vels_inf = np.append(vels_inf, vels_orb[inds_remove], axis=0)
-        masses_inf = np.append(masses_inf, masses_orb[inds_remove])
+    def plot_phase_space(self, colormap='inferno_r', counts_to_plot='all',
+                         radius_label=r'$r/R_{200}$',
+                         radial_velocity_label=r'$v_r\,\,({\rm km\, s}^{-1})$',
+                         display=False, savefile=None):
 
-        ids_orb = np.delete(ids_orb, inds_remove)
-        coords_orb = np.delete(coords_orb, inds_remove, axis=0)
-        vels_orb = np.delete(vels_orb, inds_remove, axis=0)
-        masses_orb = np.delete(masses_orb, inds_remove)
-        counts = np.delete(counts, inds_remove)
+        r_orb = magnitude(self.coords_orb)
+        vr_orb = np.einsum('...i,...i', self.vels_orb, self.coords_orb) / r_orb
+        r_inf = magnitude(self.coords_inf)
+        vr_inf = np.einsum('...i,...i', self.vels_inf, self.coords_inf) / r_inf
 
-    return (ids_orb, ids_norb, ids_inf), \
-        (coords_orb, coords_norb, coords_inf), \
-        (vels_orb, vels_norb, vels_inf), \
-        (masses_orb, masses_norb, masses_inf), \
-        counts
+        if counts_to_plot is 'all':
+            counts_to_plot = np.unique(self.counts)
 
+        clrmap = mpl.colormaps[colormap]
 
-def plot_position_space(coords, counts, colormap='inferno_r', savefile=None):
+        fig, axs = plt.subplots(
+            ncols=4, figsize=(22.5, 7), gridspec_kw={
+                'width_ratios': [20, 20, 20, 1]})
+        cbar_ax = axs[3]
+        norm = plt.Normalize(vmin=1, vmax=np.max(counts_to_plot))
+        mpl.colorbar.ColorbarBase(
+            cbar_ax, cmap=clrmap, norm=norm, orientation='vertical')
+        cbar_ax.set_title(r'$N_{\rm orbits}$', fontsize=18)
+        cbar_ax.tick_params(labelsize=18)
+        cbar_ax.yaxis.set_major_locator(MaxNLocator(integer=True))
 
-    coords_orb, coords_norb, coords_inf = coords
-
-    clrmap = mpl.colormaps[colormap]
-
-    fig, axs = plt.subplots(
-        ncols=4, figsize=(22.5, 7), gridspec_kw={
-            'width_ratios': [20, 20, 20, 1]})
-    cbar_ax = axs[3]
-    norm = plt.Normalize(vmin=1, vmax=np.max(counts))
-    mpl.colorbar.ColorbarBase(
-        cbar_ax, cmap=clrmap, norm=norm, orientation='vertical')
-    cbar_ax.set_title(r'$N_{\rm orbits}$', fontsize=18)
-    cbar_ax.tick_params(labelsize=18)
-    cbar_ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-
-    # orbiting & infalling
-    for ii in [0, 2]:
-        axs[ii].scatter(coords_inf[:, 0], coords_inf[:, 1], color='grey',
-                        alpha=0.4, marker='.', s=0.2)
-    for ii in [0, 1]:
-        for n in np.unique(counts):
-            axs[ii].scatter(coords_norb[n][:, 0], coords_norb[n][:, 1],
-                            color=clrmap(norm(n-1)), alpha=0.4, marker='.',
-                            s=0.2)
-
-    lim = max(np.abs(np.array(list(axs[0].get_xlim()) +
-                              list(axs[0].get_ylim()))))
-    titles = ['orbiting + infalling', 'orbiting', 'infalling']
-    for ax, title in zip(axs, titles):
-        ax.set_xlim(-lim, lim)
-        ax.set_ylim(-lim, lim)
-        ax.set_xlabel(r'$x$', fontsize=18)
-        ax.set_ylabel(r'$y$', fontsize=18)
-        ax.tick_params(labelsize=18)
-        ax.set_title(title, fontsize=18)
-
-    fig.tight_layout()
-    fig.savefig(savefile, dpi=300)
-    plt.close(fig)
-
-
-def plot_phase_space(coords, vels, counts, colormap='inferno_r',
-                     savefile=None):
-
-    coords_orb, coords_norb, coords_inf = coords
-    vels_orb, vels_norb, vels_inf = vels
-
-    r_orb = magnitude(coords_orb)
-    vr_orb = np.einsum('...i,...i', vels_orb, coords_orb) / r_orb
-    r_inf = magnitude(coords_inf)
-    vr_inf = np.einsum('...i,...i', vels_inf, coords_inf) / r_inf
-    r_norb, vr_norb = {}, {}
-    for n in np.unique(counts):
-        r_norb[n] = magnitude(coords_norb[n])
-        vr_norb[n] = np.einsum('...i,...i', vels_norb[n], coords_norb[n]) / \
-                     r_norb[n]
-
-    clrmap = mpl.colormaps[colormap]
-
-    fig, axs = plt.subplots(
-        ncols=4, figsize=(22.5, 7), gridspec_kw={
-            'width_ratios': [20, 20, 20, 1]})
-    cbar_ax = axs[3]
-    norm = plt.Normalize(vmin=1, vmax=np.max(counts))
-    mpl.colorbar.ColorbarBase(
-        cbar_ax, cmap=clrmap, norm=norm, orientation='vertical')
-    cbar_ax.set_title(r'$N_{\rm orbits}$', fontsize=18)
-    cbar_ax.tick_params(labelsize=18)
-    cbar_ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-
-    # orbiting & infalling
-    for ii in [0, 2]:
-        axs[ii].scatter(r_inf, vr_inf, color='grey', alpha=0.4,
-                        marker='.', s=0.2)
-    for ii in [0, 1]:
-        for n in np.unique(counts):
-            axs[ii].scatter(r_norb[n], vr_norb[n], color=clrmap(norm(n-1)),
+        # orbiting & infalling
+        for ii in [0, 2]:
+            axs[ii].scatter(r_inf/self.halo_radius, vr_inf, color='grey',
                             alpha=0.4, marker='.', s=0.2)
+            zero_orb = np.where(self.counts == 0)[0]
+            axs[ii].scatter(r_orb[zero_orb]/self.halo_radius, vr_orb[zero_orb],
+                            color='grey', alpha=0.4, marker='.', s=0.2)
+        for ii in [0, 1]:
+            for n in counts_to_plot[counts_to_plot > 0]:
+                norb = np.where(self.counts == n)[0]
+                axs[ii].scatter(r_orb[norb]/self.halo_radius, vr_orb[norb],
+                                color=clrmap(norm(n-1)), alpha=0.4, marker='.',
+                                s=0.2)
 
-    xlim = max(np.abs(np.array(list(axs[0].get_xlim()))))
-    ylim = max(np.abs(np.array(list(axs[0].get_ylim()))))
-    titles = ['orbiting + infalling', 'orbiting', 'infalling']
-    for ax, title in zip(axs, titles):
-        ax.set_xlim(0, xlim)
-        ax.set_ylim(-ylim, ylim)
-        ax.set_xlabel(r'$r$', fontsize=18)
-        ax.set_ylabel(r'$v_r$', fontsize=18)
-        ax.tick_params(labelsize=18)
-        ax.set_title(title, fontsize=18)
+        xlim = max(np.abs(np.array(list(axs[0].get_xlim()))))
+        ylim = max(np.abs(np.array(list(axs[0].get_ylim()))))
+        titles = ['orbiting + infalling', 'orbiting', 'infalling']
+        for ax, title in zip(axs, titles):
+            ax.set_xlim(0, xlim)
+            ax.set_ylim(-ylim, ylim)
+            ax.set_xlabel(radius_label, fontsize=18)
+            ax.set_ylabel(radial_velocity_label, fontsize=18)
+            ax.tick_params(labelsize=18)
+            ax.set_title(title, fontsize=18)
+        fig.tight_layout()
 
-    fig.tight_layout()
-    fig.savefig(savefile, dpi=300)
-    plt.close(fig)
+        if savefile is not None:
+            fig.savefig(savefile, dpi=300)
+        if display:
+            plt.show()
+        else:
+            plt.close(fig)
