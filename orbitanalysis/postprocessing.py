@@ -80,16 +80,16 @@ class OrbitDecomposition:
             inds_filter = myin1d(ids_orb, filter_ids_unique_)
 
             if save_to_file:
-                if 'CountsCorrected' not in sdata:
+                if 'CorrectedCounts' not in sdata:
                     sdata.create_dataset(
-                        'CountsCorrected', data=sdata['Counts'][:])
+                        'CorrectedCounts', data=sdata['Counts'][:])
 
                 counts_corrected = np.copy(
-                    sdata['CountsCorrected'][count_slice][inds_filter])
+                    sdata['CorrectedCounts'][count_slice][inds_filter])
                 counts_corrected -= filter_counts_
                 counts_corrected[counts_corrected < 0] = 0
 
-                sdata['CountsCorrected'][count_slice][inds_filter] = \
+                sdata['CorrectedCounts'][count_slice][inds_filter] = \
                     counts_corrected
             else:
                 counts = np.copy(sdata['Counts'][count_slice])
@@ -247,9 +247,27 @@ class OrbitDecomposition:
                 filtered_ids=filtered_ids)
         elif use_corrected:
             self.raw_counts = sdata['Counts'][count_slice]
-            self.counts = sdata['CountsCorrected'][count_slice]
+            self.counts = sdata['CorrectedCounts'][count_slice]
         else:
             self.counts = sdata['Counts'][count_slice]
+
+        inds_remove = np.argwhere(self.counts == 0).flatten()
+        if len(inds_remove) != 0:
+            self.ids_inf = np.append(self.ids_inf, self.ids_orb[inds_remove])
+            self.coords_inf = np.append(
+                self.coords_inf, self.coords_orb[inds_remove], axis=0)
+            self.vels_inf = np.append(
+                self.vels_inf, self.vels_orb[inds_remove], axis=0)
+            if isinstance(self.masses_inf, np.ndarray):
+                self.masses_inf = np.append(
+                    self.masses_inf, self.masses_orb[inds_remove])
+
+            self.ids_orb = np.delete(self.ids_orb, inds_remove)
+            self.coords_orb = np.delete(self.coords_orb, inds_remove, axis=0)
+            self.vels_orb = np.delete(self.vels_orb, inds_remove, axis=0)
+            if isinstance(self.masses_orb, np.ndarray):
+                self.masses_orb = np.delete(self.masses_orb, inds_remove)
+            self.counts = np.delete(self.counts, inds_remove)
 
     def plot_position_space(self, projection='xy', colormap='inferno_r',
                             counts_to_plot='all', xlabel=r'$x/R_{200}$',
@@ -286,12 +304,6 @@ class OrbitDecomposition:
         for ii in [0, 2]:
             axs[ii].scatter(self.coords_inf[:, proj[0]]/self.halo_radius,
                             self.coords_inf[:, proj[1]]/self.halo_radius,
-                            color='grey', alpha=0.4, marker='.', s=0.2)
-            zero_orb = np.where(self.counts == 0)[0]
-            axs[ii].scatter(self.coords_orb[zero_orb][:, proj[0]] /
-                            self.halo_radius,
-                            self.coords_orb[zero_orb][:, proj[1]] /
-                            self.halo_radius,
                             color='grey', alpha=0.4, marker='.', s=0.2)
         for ii in [0, 1]:
             for n in counts_to_plot[counts_to_plot > 0]:
@@ -352,9 +364,6 @@ class OrbitDecomposition:
         for ii in [0, 2]:
             axs[ii].scatter(r_inf/self.halo_radius, vr_inf, color='grey',
                             alpha=0.4, marker='.', s=0.2)
-            zero_orb = np.where(self.counts == 0)[0]
-            axs[ii].scatter(r_orb[zero_orb]/self.halo_radius, vr_orb[zero_orb],
-                            color='grey', alpha=0.4, marker='.', s=0.2)
         for ii in [0, 1]:
             for n in counts_to_plot[counts_to_plot > 0]:
                 norb = np.where(self.counts == n)[0]
