@@ -51,6 +51,7 @@ def load_snapshot_obj_subfind(snapshot, catalogue, s, hids, n_radii, verbose):
                            cutout_positions=catalogue.halo['Pos'][hids],
                            cutout_radii=n_radii * catalogue.group['R_200'][
                                catalogue.halo['HaloGroupNr'][hids]],
+                           use_kdtree=snapshot.use_kdtree,
                            read_mode=snapshot.read_mode,
                            npool=snapshot.npool,
                            unit_length_in_cm=snapshot.unit_length,
