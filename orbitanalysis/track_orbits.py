@@ -250,10 +250,9 @@ def initialize_savefile(savefile, ids, coords, vels, masses, offsets, redshift,
     hf.create_dataset('HaloIDs', data=haloids)
     hf.create_dataset('Positions', data=positions)
     hf.create_dataset('Radii', data=radiis)
+    hf.create_dataset('ParticleMasses', data=np.zeros(nsnaps))
     if not isinstance(masses, np.ndarray):
-        m = np.empty(nsnaps)
-        m[0] = masses
-        hf.create_dataset('ParticleMasses', data=m)
+        hf['ParticleMasses'][0] = masses
 
     head = hf.create_group('Options')
     attrs = [('SnapDir', snapdir),
