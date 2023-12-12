@@ -4,31 +4,39 @@ import gc
 import h5py
 from pathos.multiprocessing import ProcessingPool as Pool
 
+from orbitanalysis.collate import collate_orbit_history
 from orbitanalysis.utils import myin1d
 
 
 def track_orbits(load_halo_particle_ids, load_snapshot_object, snapshot,
-                 catalogue, haloids, n_radii, mode='pericentric',
-                 initial_snapshot_number=0, tree=None, savefile=None,
-                 npool=None, verbose=True):
+                 catalogue, haloids, n_radii, savefile, mode='pericentric',
+                 initial_snapshot_number=0, tree=None, collate=True,
+                 save_properties=True, npool=None, verbose=True):
     """
     """
 
     tstart = time.time()
+
+    # intermediate file
+    ext = savefile.split('.')[-1]
+    if ext == 'h5' or ext == 'hdf5':
+        savefile_ = savefile[:-(len(ext) + 1)] + '_onthefly.' + ext
+    else:
+        savefile_ = savefile + '_onthefly'
 
     coords, vels, radial_vels_next, ids_central = region_frame(
         snapshot, verbose)
     ids_next = snapshot.ids
     region_offsets_next = snapshot.region_offsets
 
-    initialize_savefile(savefile, snapshot.ids, coords, vels, snapshot.masses,
+    initialize_savefile(savefile_, snapshot.ids, coords, vels, snapshot.masses,
                         snapshot.region_offsets, snapshot.redshift, haloids,
                         snapshot.cutout_positions,
                         snapshot.cutout_radii / n_radii,
                         snapshot.snapshot_number,
                         snapshot.snapshot_number-initial_snapshot_number+1,
                         snapshot.snapshot_path, snapshot.particle_type,
-                        n_radii, verbose)
+                        n_radii, save_properties, verbose)
 
     for ii, snapnum in enumerate(np.flip(np.arange(
             initial_snapshot_number, snapshot.snapshot_number))):
@@ -71,13 +79,17 @@ def track_orbits(load_halo_particle_ids, load_snapshot_object, snapshot,
                 mode, snapshot.ids, ids_next, radial_vels, radial_vels_next,
                 snapshot.region_offsets, region_offsets_next, verbose)
 
-        save_to_file(savefile, orbiting_ids_at_snapshot_, orbiting_offsets,
+        save_to_file(savefile_, orbiting_ids_at_snapshot_, orbiting_offsets,
                      snapshot.ids, coords, vels, snapshot.masses,
                      snapshot.region_offsets, snapshot.redshift, positions,
-                     radii, snapnum, haloids_new_, ii+1, verbose)
+                     radii, snapnum, haloids_new_, ii+1, save_properties,
+                     verbose)
 
         ids_next, radial_vels_next, region_offsets_next = \
             snapshot.ids, radial_vels, snapshot.region_offsets
+
+    if collate:
+        collate_orbit_history(savefile, save_properties, verbose)
 
     if verbose:
         print('Finished orbiting decomposition (took {} s)\n'.format(
@@ -220,7 +232,7 @@ def compare_radial_velocities(mode, ids, ids_next, radial_vels,
 
 def initialize_savefile(savefile, ids, coords, vels, masses, offsets, redshift,
                         hids, pos, radii, snapshot_number, nsnaps, snapdir,
-                        particle_type, n_radii, verbose):
+                        particle_type, n_radii, save_properties, verbose):
 
     if verbose:
         print('Initializing savefile...')
@@ -231,9 +243,10 @@ def initialize_savefile(savefile, ids, coords, vels, masses, offsets, redshift,
     gsnap_new = hf.create_group('Snapshot{}'.format('%0.3d' % snapshot_number))
     gsnap_new.create_dataset('IDs', data=ids)
     gsnap_new.create_dataset('Coordinates', data=coords)
-    gsnap_new.create_dataset('Velocities', data=vels)
-    if isinstance(masses, np.ndarray):
-        gsnap_new.create_dataset('Masses', data=masses)
+    if save_properties:
+        gsnap_new.create_dataset('Velocities', data=vels)
+        if isinstance(masses, np.ndarray):
+            gsnap_new.create_dataset('Masses', data=masses)
     gsnap_new.create_dataset('Offsets', data=offsets)
 
     redshifts = np.empty(nsnaps)
@@ -255,11 +268,11 @@ def initialize_savefile(savefile, ids, coords, vels, masses, offsets, redshift,
         hf['ParticleMasses'][0] = masses
 
     head = hf.create_group('Options')
-    attrs = [('SnapDir', snapdir),
-             ('PartType', particle_type),
-             ('NumRadii', n_radii)]
-    for attr in list(attrs):
-        head.attrs[attr[0]] = attr[1]
+    opts = [('SnapDir', snapdir),
+            ('PartType', particle_type),
+            ('NumRadii', n_radii)]
+    for attr, val in opts:
+        head.attrs[attr] = val
 
     hf.close()
 
@@ -269,7 +282,7 @@ def initialize_savefile(savefile, ids, coords, vels, masses, offsets, redshift,
 
 def save_to_file(savefile, orbiting_ids_at_snapshot, orbiting_offsets, ids,
                  coords, vels, masses, offsets, redshift, pos, radii,
-                 snapshot_number, progens, index, verbose):
+                 snapshot_number, progens, index, save_properties, verbose):
 
     if verbose:
         print('Saving to file...')
@@ -284,9 +297,10 @@ def save_to_file(savefile, orbiting_ids_at_snapshot, orbiting_offsets, ids,
     gsnap_new = hf.create_group('Snapshot{}'.format('%0.3d' % snapshot_number))
     gsnap_new.create_dataset('IDs', data=ids)
     gsnap_new.create_dataset('Coordinates', data=coords)
-    gsnap_new.create_dataset('Velocities', data=vels)
-    if isinstance(masses, np.ndarray):
-        gsnap_new.create_dataset('Masses', data=masses)
+    if save_properties:
+        gsnap_new.create_dataset('Velocities', data=vels)
+        if isinstance(masses, np.ndarray):
+            gsnap_new.create_dataset('Masses', data=masses)
     gsnap_new.create_dataset('Offsets', data=offsets)
 
     hf['Redshifts'][index] = redshift

@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import h5py
 import time
@@ -5,12 +6,17 @@ import time
 from orbitanalysis.utils import myin1d, magnitude
 
 
-def collate_orbit_history(readfile, savefile, save_properties=True,
-                          verbose=True):
+def collate_orbit_history(savefile, save_properties=True, verbose=True):
 
     if verbose:
         print('Collating data...')
         t0 = time.time()
+
+    ext = savefile.split('.')[-1]
+    if ext == 'h5' or ext == 'hdf5':
+        readfile = savefile[:-(len(ext) + 1)] + '_onthefly.' + ext
+    else:
+        readfile = savefile + '_onthefly'
 
     hf = h5py.File(readfile, 'r')
     snapshot_numbers = np.sort([
@@ -33,11 +39,14 @@ def collate_orbit_history(readfile, savefile, save_properties=True,
         orbiting_ids_new = hfsnap['OrbitingIDs'][()]
         ids_all = hfsnap['IDs'][()]
         coords_all = hfsnap['Coordinates'][()]
-        vels_all = hfsnap['Velocities'][()]
-        if 'Masses' in hfsnap:
-            masses_all = hfsnap['Masses'][()]
+        if save_properties:
+            vels_all = hfsnap['Velocities'][()]
+            if 'Masses' in hfsnap:
+                masses_all = hfsnap['Masses'][()]
+            else:
+                masses_all = None
         else:
-            masses_all = None
+            vels_all, masses_all = None, None
         offsets_all = hfsnap['Offsets'][()]
 
         slices, hinds, norb = get_slices(hfsnap, orbiting_offsets_prev,
@@ -85,9 +94,10 @@ def collate_orbit_history(readfile, savefile, save_properties=True,
             ids_all[slin] = ids_all[slin][order]
 
             coords_all[slin] = coords_all[slin][order]
-            vels_all[slin] = vels_all[slin][order]
-            if 'Masses' in hfsnap:
-                masses_all[slin] = masses_all[slin][order]
+            if save_properties:
+                vels_all[slin] = vels_all[slin][order]
+                if 'Masses' in hfsnap:
+                    masses_all[slin] = masses_all[slin][order]
 
             angles[slin] = np.zeros(
                 np.diff(intslice_new)[0], dtype=np.float32)
@@ -129,9 +139,8 @@ def collate_orbit_history(readfile, savefile, save_properties=True,
 
         print('Snapshot {} done'.format(snapshot_number))
 
-    if 'ParticleMasses' in hf:
-        masses = np.flip(hf['ParticleMasses'][:nsnap], axis=0)
-    else:
+    masses = np.flip(hf['ParticleMasses'][:nsnap], axis=0)
+    if np.all(masses == 0.0):
         masses = None
     write_global_data(hf, hf_new,
                       snapshot_numbers,
@@ -144,6 +153,8 @@ def collate_orbit_history(readfile, savefile, save_properties=True,
 
     hf.close()
     hf_new.close()
+
+    os.remove(readfile)
 
     if verbose:
         print('Collation done (took {} s)'.format(time.time() - t0))
@@ -202,7 +213,7 @@ def get_slices(hfsnap, orbiting_offsets_prev, infalling_offsets_prev, halo_ids,
 
 
 def write_data(gsnap, ids, counts, orb_offsets, inf_offsets, coords, vels,
-               masses, phase_angles, save_properties):
+               masses, angles, save_properties):
 
     gsnap.create_dataset('IDs', data=ids)
     gsnap.create_dataset('Counts', data=counts)
@@ -213,7 +224,7 @@ def write_data(gsnap, ids, counts, orb_offsets, inf_offsets, coords, vels,
         gsnap.create_dataset('Velocities', data=vels)
         if masses is not None:
             gsnap.create_dataset('Masses', data=masses)
-    gsnap.create_dataset('PhaseAngles', data=phase_angles)
+    gsnap.create_dataset('Angles', data=angles)
 
 
 def write_global_data(hf, hf_new, snapshot_numbers, redshifts, halo_indices,

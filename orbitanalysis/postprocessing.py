@@ -27,7 +27,7 @@ class OrbitDecomposition:
 
     def correct_counts_and_save_to_file(self, angle_condition=np.pi/2):
 
-        for halo_index in range(len(self.halo_indices[0])):
+        for halo_index in self.halo_indices[-1]:
             self.correct_counts(halo_index, angle_condition, save_to_file=True)
 
     def correct_counts(self, halo_index, angle_condition=np.pi/2,
@@ -38,9 +38,10 @@ class OrbitDecomposition:
             filtered_ids = self.filter_pericenters(
                 halo_index, angle_condition, final_snapshot=snapshot_number)
 
+        hind = np.argwhere(self.halo_indices[-1] == halo_index).flatten()[0]
+
         if snapshot_number is None:
-            no_progen = np.count_nonzero(
-                self.halo_indices[:, halo_index] == -1)
+            no_progen = np.count_nonzero(self.halo_indices[:, hind] == -1)
             snapshot_numbers = self.snapshot_numbers[no_progen:]
         else:
             snapshot_numbers = np.array([snapshot_number])
@@ -48,7 +49,8 @@ class OrbitDecomposition:
         for snap_num in snapshot_numbers:
 
             if snapshot_number is None:
-                snap_ind = np.where(snapshot_numbers == snap_num)[0][0]
+                snap_ind = np.argwhere(
+                    snapshot_numbers == snap_num).flatten()[0]
                 filtered_ids_snap = np.concatenate(filtered_ids[:snap_ind + 1])
             else:
                 filtered_ids_snap = np.concatenate(filtered_ids)
@@ -56,8 +58,7 @@ class OrbitDecomposition:
             filtered_ids_unique, filter_counts = np.unique(
                 filtered_ids_snap, return_counts=True)
 
-            sdata = self.datafile[
-                'Snapshot{}'.format('%0.3d' % snap_num)]
+            sdata = self.datafile['Snapshot{}'.format('%0.3d' % snap_num)]
             orb_offsets = sdata['OrbitingOffsets'][()]
             inf_offsets = sdata['InfallingOffsets'][()]
             orb_ranges = list(zip(orb_offsets[:-1], inf_offsets))
@@ -66,8 +67,8 @@ class OrbitDecomposition:
             count_ranges = list(
                 zip(counts_offsets[:-1], counts_offsets[1:]))
 
-            orb_slice = slice(*orb_ranges[halo_index])
-            count_slice = slice(*count_ranges[halo_index])
+            orb_slice = slice(*orb_ranges[hind])
+            count_slice = slice(*count_ranges[hind])
 
             ids_orb = sdata['IDs'][orb_slice]
 
@@ -82,15 +83,16 @@ class OrbitDecomposition:
             if save_to_file:
                 if 'CorrectedCounts' not in sdata:
                     sdata.create_dataset(
-                        'CorrectedCounts', data=sdata['Counts'][:])
+                        'CorrectedCounts', data=np.copy(sdata['Counts'][:]))
 
                 counts_corrected = np.copy(
-                    sdata['CorrectedCounts'][count_slice][inds_filter])
+                    sdata['Counts'][count_slice][inds_filter])
                 counts_corrected -= filter_counts_
                 counts_corrected[counts_corrected < 0] = 0
 
-                sdata['CorrectedCounts'][count_slice][inds_filter] = \
-                    counts_corrected
+                temp = np.copy(sdata['CorrectedCounts'])
+                temp[count_slice][inds_filter] = counts_corrected
+                sdata['CorrectedCounts'][:] = temp
             else:
                 counts = np.copy(sdata['Counts'][count_slice])
                 counts[inds_filter] -= filter_counts_
@@ -100,7 +102,8 @@ class OrbitDecomposition:
     def filter_pericenters(self, halo_index, angle_condition,
                            final_snapshot=None):
 
-        no_progen = np.count_nonzero(self.halo_indices[:, halo_index] == -1)
+        hind = np.argwhere(self.halo_indices[-1] == halo_index).flatten()[0]
+        no_progen = np.count_nonzero(self.halo_indices[:, hind] == -1)
         snapshot_numbers = self.snapshot_numbers[no_progen:]
 
         if final_snapshot is not None:
@@ -120,11 +123,11 @@ class OrbitDecomposition:
                 inf_offsets - orb_offsets[:-1])])
             count_ranges = list(zip(counts_offsets[:-1], counts_offsets[1:]))
 
-            orb_slice = slice(*orb_ranges[halo_index])
-            count_slice = slice(*count_ranges[halo_index])
+            orb_slice = slice(*orb_ranges[hind])
+            count_slice = slice(*count_ranges[hind])
 
             ids_orb = sdata['IDs'][orb_slice]
-            angles_orb = sdata['PhaseAngles'][orb_slice]
+            angles_orb = sdata['Angles'][orb_slice]
             counts = sdata['Counts'][count_slice]
             if ii > 0:
                 departed = np.setdiff1d(ids_orb_prev, ids_orb)
@@ -173,7 +176,7 @@ class OrbitDecomposition:
             filter_ids_ii.append(ids1[filter_inds_remaining])
 
             filtered_ids.append(np.concatenate(filter_ids_ii))
-        filtered_ids.append(np.array([]))
+        filtered_ids.append(np.array([], dtype=type(filtered_ids[0][0])))
         filtered_ids = [
             filtered_ids[-ii] for ii in range(1, len(filtered_ids)+1)]
 
@@ -185,6 +188,8 @@ class OrbitDecomposition:
                                            filtered_ids=None,
                                            snapshot_data=None):
 
+        hind = np.argwhere(self.halo_indices[-1] == halo_index).flatten()[0]
+
         sdata = self.datafile['Snapshot{}'.format('%0.3d' % snapshot_number)]
 
         orb_offsets = sdata['OrbitingOffsets'][()]
@@ -194,13 +199,13 @@ class OrbitDecomposition:
         orb_slices = list(zip(orb_offsets[:-1], inf_offsets))
         inf_slices = list(zip(inf_offsets, orb_offsets[1:]))
         count_slices = list(zip(counts_offsets[:-1], counts_offsets[1:]))
-        orb_slice = slice(*orb_slices[halo_index])
-        inf_slice = slice(*inf_slices[halo_index])
-        count_slice = slice(*count_slices[halo_index])
+        orb_slice = slice(*orb_slices[hind])
+        inf_slice = slice(*inf_slices[hind])
+        count_slice = slice(*count_slices[hind])
 
         snap_ind = np.where(self.snapshot_numbers == snapshot_number)[0][0]
-        self.halo_radius = self.halo_radii[snap_ind, halo_index]
-        self.halo_position = self.halo_positions[snap_ind, halo_index]
+        self.halo_radius = self.halo_radii[snap_ind, hind]
+        self.halo_position = self.halo_positions[snap_ind, hind]
         self.redshift = self.redshifts[snap_ind]
         if hasattr(self, 'particle_masses'):
             particle_mass = self.particle_masses[snap_ind]
@@ -239,6 +244,7 @@ class OrbitDecomposition:
             else:
                 self.masses_inf = snapshot_data.masses
 
+        angle_condition = 0.0 if angle_condition is None else angle_condition
         if not use_corrected and (
                 angle_condition > 0.0 or filtered_ids is not None):
             self.raw_counts = sdata['Counts'][count_slice]
