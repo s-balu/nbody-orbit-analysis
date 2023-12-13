@@ -9,8 +9,8 @@ from orbitanalysis.postprocessing import OrbitDecomposition
 
 ###############################################################################
 
-snapshot_dir = 'path/to/snapshot/files'
-catalaogue_dir = 'path/to/catalogue/files'
+snapshot_dir = 'path/to/snapshots'
+catalaogue_dir = 'path/to/catalogues'
 snapshot_filename = 'snapshot_{}.hdf5'
 catalogue_filename = 'fof_subhalo_tab_{}.hdf5'
 
@@ -60,12 +60,13 @@ track_orbits(load_halo_particle_ids_subfind, load_snapshot_obj_subfind,
 # post-processing
 orb_decomp = OrbitDecomposition(savefile)
 orb_decomp.correct_counts_and_save_to_file(angle_condition=np.pi/2)
-orb_decomp.get_halo_decomposition_at_snapshot(
-    snapshot_number=48, halo_index=haloids_at_final_snapshot[0],
-    use_corrected=False, angle_condition=np.pi/2)
 orb_decomp.datafile.close()
 
 # plotting
+orb_decomp = OrbitDecomposition(savefile)
+orb_decomp.get_halo_decomposition_at_snapshot(
+    snapshot_number=48, halo_index=haloids_at_final_snapshot[0],
+    use_corrected=True)
 orb_decomp.plot_position_space(
     projection='xy', colormap='inferno_r', counts_to_plot='all',
     xlabel=r'$x/R_{200}$', ylabel=r'$y/R_{200}$', display=False,
@@ -74,3 +75,4 @@ orb_decomp.plot_phase_space(
     colormap='inferno_r', counts_to_plot='all', radius_label=r'$r/R_{200}$',
     radial_velocity_label=r'$v_r\,\,({\rm km\, s}^{-1})$', display=False,
     savefile=savedir + '/phase_space.png')
+orb_decomp.datafile.close()
