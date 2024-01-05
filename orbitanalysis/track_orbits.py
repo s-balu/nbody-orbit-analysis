@@ -113,10 +113,19 @@ def region_frame(snapshot, verbose):
         axis=0)
     del snapshot.coordinates
     gc.collect()
-    region_vels = np.concatenate(
-        [snapshot.velocities[start:end] - np.mean(
-            snapshot.velocities[start:end], axis=0) for start, end in vslices],
-        axis=0)
+    if isinstance(snapshot.masses, np.ndarray):
+        region_vels = np.concatenate(
+            [snapshot.velocities[start:end] - np.sum(
+                snapshot.masses[start:end][:, np.newaxis] *
+                snapshot.velocities[start:end], axis=0) / np.sum(
+                snapshot.masses[start:end]) for start, end in vslices],
+            axis=0)
+    else:
+        region_vels = np.concatenate(
+            [snapshot.velocities[start:end] - np.mean(
+                snapshot.velocities[start:end], axis=0) for start, end in
+             vslices],
+            axis=0)
     del snapshot.velocities
     gc.collect()
     rads = np.sqrt(np.einsum('...i,...i', region_coords, region_coords))
