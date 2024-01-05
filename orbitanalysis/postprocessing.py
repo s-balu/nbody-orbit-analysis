@@ -220,9 +220,9 @@ class OrbitDecomposition:
                 self.masses_orb = sdata['Masses'][orb_slice]
         else:
             self.inds_orb = myin1d(snapshot_data.ids, self.ids_orb)
-            self.coords_orb = snapshot_data.coords[self.inds_orb] - \
+            self.coords_orb = snapshot_data.coordinates[self.inds_orb] - \
                 self.halo_position
-            self.vels_orb = snapshot_data.vels[self.inds_orb]
+            self.vels_orb = snapshot_data.velocities[self.inds_orb]
             if isinstance(snapshot_data.masses, np.ndarray):
                 self.masses_orb = snapshot_data.masses[self.inds_orb]
             else:
@@ -236,9 +236,9 @@ class OrbitDecomposition:
                 self.masses_inf = sdata['Masses'][inf_slice]
         else:
             self.inds_inf = myin1d(snapshot_data.ids, self.ids_inf)
-            self.coords_inf = snapshot_data.coords[self.inds_inf] - \
+            self.coords_inf = snapshot_data.coordinates[self.inds_inf] - \
                 self.halo_position
-            self.vels_inf = snapshot_data.vels[self.inds_inf]
+            self.vels_inf = snapshot_data.velocities[self.inds_inf]
             if isinstance(snapshot_data.masses, np.ndarray):
                 self.masses_inf = snapshot_data.masses[self.inds_inf]
             else:

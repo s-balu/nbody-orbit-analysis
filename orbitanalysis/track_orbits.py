@@ -8,10 +8,10 @@ from orbitanalysis.collate import collate_orbit_history
 from orbitanalysis.utils import myin1d
 
 
-def track_orbits(load_halo_particle_ids, load_snapshot_object, snapshot,
-                 catalogue, haloids, n_radii, savefile, mode='pericentric',
-                 initial_snapshot_number=0, tree=None, collate=True,
-                 save_properties=True, npool=None, verbose=True):
+def track_orbits(load_halo_particle_ids, load_snapshot_object, regions,
+                 snapshot, catalogue, haloids, n_radii, savefile,
+                 mode='pericentric', initial_snapshot_number=0, tree=None,
+                 collate=True, save_properties=True, npool=None, verbose=True):
     """
     """
 
@@ -31,8 +31,8 @@ def track_orbits(load_halo_particle_ids, load_snapshot_object, snapshot,
 
     initialize_savefile(savefile_, snapshot.ids, coords, vels, snapshot.masses,
                         snapshot.region_offsets, snapshot.redshift, haloids,
-                        snapshot.cutout_positions,
-                        snapshot.cutout_radii / n_radii,
+                        snapshot.region_positions,
+                        snapshot.region_radii / n_radii,
                         snapshot.snapshot_number,
                         snapshot.snapshot_number-initial_snapshot_number+1,
                         snapshot.snapshot_path, snapshot.particle_type,
@@ -63,16 +63,18 @@ def track_orbits(load_halo_particle_ids, load_snapshot_object, snapshot,
         lens = [end-start for start, end in slices[has_progen]]
         region_offsets_next = np.concatenate([[0], np.cumsum(lens)])
 
+        region_positions, region_radii = regions(catalogue, haloids_new)
         snapshot = load_snapshot_object(
-            snapshot, catalogue, snapnum, haloids_new, n_radii, verbose)
+            snapshot, snapnum, region_positions, n_radii * region_radii,
+            verbose)
 
         coords, vels, radial_vels, ids_central = region_frame(
             snapshot, verbose)
 
         radii = -np.ones(len(haloids))
-        radii[has_progen] = snapshot.cutout_radii / n_radii
+        radii[has_progen] = snapshot.region_radii / n_radii
         positions = -np.ones((len(haloids), 3))
-        positions[has_progen, :] = snapshot.cutout_positions
+        positions[has_progen, :] = snapshot.region_positions
 
         orbiting_ids_at_snapshot_, orbiting_offsets = \
             compare_radial_velocities(
@@ -103,17 +105,19 @@ def region_frame(snapshot, verbose):
         t0 = time.time()
 
     cslices = list(zip(snapshot.region_offsets[:-1],
-                       snapshot.region_offsets[1:], snapshot.cutout_positions))
+                       snapshot.region_offsets[1:], snapshot.region_positions))
     vslices = list(zip(snapshot.region_offsets[:-1],
                        snapshot.region_offsets[1:]))
     region_coords = np.concatenate([
-        snapshot.coords[start:end]-p for start, end, p in cslices], axis=0)
-    del snapshot.coords
+        snapshot.coordinates[start:end]-p for start, end, p in cslices],
+        axis=0)
+    del snapshot.coordinates
     gc.collect()
-    region_vels = np.concatenate([
-        snapshot.vels[start:end] - np.mean(snapshot.vels[start:end], axis=0)
-        for start, end in vslices], axis=0)
-    del snapshot.vels
+    region_vels = np.concatenate(
+        [snapshot.velocities[start:end] - np.mean(
+            snapshot.velocities[start:end], axis=0) for start, end in vslices],
+        axis=0)
+    del snapshot.velocities
     gc.collect()
     rads = np.sqrt(np.einsum('...i,...i', region_coords, region_coords))
     radial_vels = np.einsum('...i,...i', region_vels, region_coords) / rads

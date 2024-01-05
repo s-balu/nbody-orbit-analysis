@@ -1,9 +1,9 @@
 import numpy as np
 
-from simtools.sim_readers import GadgetSnap, GadgetCat
+from simtools.sim_readers import GadgetSnapshot, GadgetCatalogue
 
-from orbitanalysis.funcs import load_halo_particle_ids_subfind, \
-    load_snapshot_obj_subfind
+from orbitanalysis.funcs import load_halo_particle_ids_gadget, \
+    load_snapshot_obj_gadget
 from orbitanalysis.track_orbits import track_orbits
 from orbitanalysis.postprocessing import OrbitDecomposition
 
@@ -26,36 +26,41 @@ savefile = savedir + '/orbit_decomposition.hdf5'
 
 ###############################################################################
 
-final_catalogue = GadgetCat(path=catalaogue_dir,
-                            catalogue_filename=catalogue_filename,
-                            snapshot_number=final_snapshot_number,
-                            particle_type=particle_type,
-                            verbose=True
-                            )
+final_catalogue = GadgetCatalogue(
+    path=catalaogue_dir,
+    catalogue_filename=catalogue_filename,
+    snapshot_number=final_snapshot_number,
+    particle_type=particle_type,
+    verbose=True)
 
-haloids_at_final_snapshot = final_catalogue.group['FirstSub'][
+haloids_at_final_snapshot = final_catalogue.group['first_subhalo'][
     groupids_at_snapshot]
 haloids_at_final_snapshot = haloids_at_final_snapshot[
     haloids_at_final_snapshot > -1]
 
-final_snapshot = GadgetSnap(path=snapshot_dir,
-                            snapshot_filename=snapshot_filename,
-                            snapshot_number=final_snapshot_number,
-                            particle_type=particle_type,
-                            cutout_positions=final_catalogue.halo['Pos'][
-                               haloids_at_final_snapshot],
-                            cutout_radii=n_radii * final_catalogue.group[
-                               'R_200'][final_catalogue.halo['HaloGroupNr'][
-                                   haloids_at_final_snapshot]],
-                            read_mode=1,
-                            to_physical=False,
-                            buffer=1.0e-7,
-                            verbose=True
-                            )
 
-track_orbits(load_halo_particle_ids_subfind, load_snapshot_obj_subfind,
-             final_snapshot, final_catalogue, haloids_at_final_snapshot,
-             n_radii, savefile, mode, initial_snapshot_number, verbose=True)
+def regions(catalogue, haloids):
+    return catalogue.halo['center_of_mass'][haloids], catalogue.group[
+        'R_200crit'][catalogue.halo['group_number'][haloids]]
+
+
+final_region_positions, final_region_radii = regions(
+    final_catalogue, haloids_at_final_snapshot)
+final_snapshot = GadgetSnapshot(
+    path=snapshot_dir,
+    snapshot_filename=snapshot_filename,
+    snapshot_number=final_snapshot_number,
+    particle_type=particle_type,
+    region_positions=final_region_positions,
+    region_radii=n_radii * final_region_radii,
+    read_mode=1,
+    buffer=1.0e-7,
+    verbose=True)
+
+track_orbits(load_halo_particle_ids_gadget, load_snapshot_obj_gadget,
+             regions, final_snapshot, final_catalogue,
+             haloids_at_final_snapshot, n_radii, savefile, mode,
+             initial_snapshot_number, verbose=True)
 
 # post-processing
 orb_decomp = OrbitDecomposition(savefile)
