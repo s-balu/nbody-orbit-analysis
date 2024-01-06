@@ -148,6 +148,7 @@ def collate_orbit_history(savefile, save_properties=True, verbose=True):
                       halo_ids,
                       np.flip(hf['Positions'][:nsnap], axis=0),
                       np.flip(hf['Radii'][:nsnap], axis=0),
+                      np.flip(hf['BulkVelocities'][:nsnap], axis=0),
                       masses
                       )
 
@@ -228,13 +229,14 @@ def write_data(gsnap, ids, counts, orb_offsets, inf_offsets, coords, vels,
 
 
 def write_global_data(hf, hf_new, snapshot_numbers, redshifts, halo_indices,
-                      positions, radii, masses):
+                      positions, radii, bulk_velocities, masses):
 
     hf_new.create_dataset('SnapshotNumbers', data=snapshot_numbers)
     hf_new.create_dataset('Redshifts', data=redshifts)
     hf_new.create_dataset('HaloIndices', data=halo_indices)
     hf_new.create_dataset('Positions', data=positions)
     hf_new.create_dataset('Radii', data=radii)
+    hf_new.create_dataset('BulkVelocities', data=bulk_velocities)
     if masses is not None:
         hf_new.create_dataset('ParticleMasses', data=masses)
 
