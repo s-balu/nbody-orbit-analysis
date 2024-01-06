@@ -24,7 +24,7 @@ def track_orbits(load_halo_particle_ids, load_snapshot_object, regions,
     else:
         savefile_ = savefile + '_onthefly'
 
-    coords, vels, radial_vels_next, ids_central = region_frame(
+    coords, vels, bulk_vels, radial_vels_next, ids_central = region_frame(
         snapshot, verbose)
     ids_next = snapshot.ids
     region_offsets_next = snapshot.region_offsets
@@ -33,6 +33,7 @@ def track_orbits(load_halo_particle_ids, load_snapshot_object, regions,
                         snapshot.region_offsets, snapshot.redshift, haloids,
                         snapshot.region_positions,
                         snapshot.region_radii / n_radii,
+                        bulk_vels,
                         snapshot.snapshot_number,
                         snapshot.snapshot_number-initial_snapshot_number+1,
                         snapshot.snapshot_path, snapshot.particle_type,
@@ -68,13 +69,15 @@ def track_orbits(load_halo_particle_ids, load_snapshot_object, regions,
             snapshot, snapnum, region_positions, n_radii * region_radii,
             verbose)
 
-        coords, vels, radial_vels, ids_central = region_frame(
+        coords, vels, bulk_vels, radial_vels, ids_central = region_frame(
             snapshot, verbose)
 
         radii = -np.ones(len(haloids))
         radii[has_progen] = snapshot.region_radii / n_radii
         positions = -np.ones((len(haloids), 3))
         positions[has_progen, :] = snapshot.region_positions
+        region_vels = -np.ones((len(haloids), 3))
+        region_vels[has_progen, :] = bulk_vels
 
         orbiting_ids_at_snapshot_, orbiting_offsets = \
             compare_radial_velocities(
@@ -84,8 +87,8 @@ def track_orbits(load_halo_particle_ids, load_snapshot_object, regions,
         save_to_file(savefile_, orbiting_ids_at_snapshot_, orbiting_offsets,
                      snapshot.ids, coords, vels, snapshot.masses,
                      snapshot.region_offsets, snapshot.redshift, positions,
-                     radii, snapnum, haloids_new_, ii+1, save_properties,
-                     verbose)
+                     radii, region_vels, snapnum, haloids_new_, ii+1,
+                     save_properties, verbose)
 
         ids_next, radial_vels_next, region_offsets_next = \
             snapshot.ids, radial_vels, snapshot.region_offsets
@@ -113,19 +116,20 @@ def region_frame(snapshot, verbose):
         axis=0)
     del snapshot.coordinates
     gc.collect()
+    region_vels, region_bulk_vels = [], []
     if isinstance(snapshot.masses, np.ndarray):
-        region_vels = np.concatenate(
-            [snapshot.velocities[start:end] - np.sum(
-                snapshot.masses[start:end][:, np.newaxis] *
+        for start, end in vslices:
+            bulk_vel = np.sum(snapshot.masses[start:end][:, np.newaxis] *
                 snapshot.velocities[start:end], axis=0) / np.sum(
-                snapshot.masses[start:end]) for start, end in vslices],
-            axis=0)
+                snapshot.masses[start:end])
+            region_vels.append(snapshot.velocities[start:end] - bulk_vel)
+            region_bulk_vels.append(bulk_vel)
     else:
-        region_vels = np.concatenate(
-            [snapshot.velocities[start:end] - np.mean(
-                snapshot.velocities[start:end], axis=0) for start, end in
-             vslices],
-            axis=0)
+        for start, end in vslices:
+            bulk_vel = np.mean(snapshot.velocities[start:end], axis=0)
+            region_vels.append(snapshot.velocities[start:end] - bulk_vel)
+            region_bulk_vels.append(bulk_vel)
+    region_vels = np.concatenate(region_vels, axis=0)
     del snapshot.velocities
     gc.collect()
     rads = np.sqrt(np.einsum('...i,...i', region_coords, region_coords))
@@ -137,7 +141,8 @@ def region_frame(snapshot, verbose):
         print('Transformed to region frames (took {} s)\n'.format(
             time.time() - t0))
 
-    return region_coords, region_vels, radial_vels, ids_tracked
+    return region_coords, region_vels, np.array(region_bulk_vels), \
+        radial_vels, ids_tracked
 
 
 def find_main_progenitors(halo_pids, tracked_ids, npool):
@@ -244,8 +249,9 @@ def compare_radial_velocities(mode, ids, ids_next, radial_vels,
 
 
 def initialize_savefile(savefile, ids, coords, vels, masses, offsets, redshift,
-                        hids, pos, radii, snapshot_number, nsnaps, snapdir,
-                        particle_type, n_radii, save_properties, verbose):
+                        hids, pos, radii, bulk_vel, snapshot_number, nsnaps,
+                        snapdir, particle_type, n_radii, save_properties,
+                        verbose):
 
     if verbose:
         print('Initializing savefile...')
@@ -266,16 +272,19 @@ def initialize_savefile(savefile, ids, coords, vels, masses, offsets, redshift,
     haloids = np.empty((nsnaps, len(hids)), dtype=np.int32)
     positions = np.empty((nsnaps, len(hids), 3))
     radiis = np.empty((nsnaps, len(hids)))
+    bulk_velocities = np.empty((nsnaps, len(hids), 3))
 
     redshifts[0] = redshift
     haloids[0, :] = hids
     radiis[0, :] = radii
     positions[0, :, :] = pos
+    bulk_velocities[0, :, :] = bulk_vel
 
     hf.create_dataset('Redshifts', data=redshifts)
     hf.create_dataset('HaloIDs', data=haloids)
     hf.create_dataset('Positions', data=positions)
     hf.create_dataset('Radii', data=radiis)
+    hf.create_dataset('BulkVelocities', data=bulk_velocities)
     hf.create_dataset('ParticleMasses', data=np.zeros(nsnaps))
     if not isinstance(masses, np.ndarray):
         hf['ParticleMasses'][0] = masses
@@ -294,7 +303,7 @@ def initialize_savefile(savefile, ids, coords, vels, masses, offsets, redshift,
 
 
 def save_to_file(savefile, orbiting_ids_at_snapshot, orbiting_offsets, ids,
-                 coords, vels, masses, offsets, redshift, pos, radii,
+                 coords, vels, masses, offsets, redshift, pos, radii, bulk_vel,
                  snapshot_number, progens, index, save_properties, verbose):
 
     if verbose:
@@ -320,6 +329,7 @@ def save_to_file(savefile, orbiting_ids_at_snapshot, orbiting_offsets, ids,
     hf['HaloIDs'][index, :] = progens
     hf['Radii'][index, :] = radii
     hf['Positions'][index, :, :] = pos
+    hf['BulkVelocities'][index, :, :] = bulk_vel
     if not isinstance(masses, np.ndarray):
         hf['ParticleMasses'][index] = masses
 

@@ -18,6 +18,7 @@ class OrbitDecomposition:
             self.particle_masses = self.datafile['ParticleMasses']
         self.halo_positions = self.datafile['Positions'][:]
         self.halo_radii = self.datafile['Radii'][:]
+        self.halo_velocities = self.datafile['BulkVelocities'][:]
         self.redshifts = self.datafile['Redshifts'][:]
         self.snapshot_numbers = self.datafile['SnapshotNumbers'][:]
 
@@ -206,6 +207,7 @@ class OrbitDecomposition:
         snap_ind = np.where(self.snapshot_numbers == snapshot_number)[0][0]
         self.halo_radius = self.halo_radii[snap_ind, hind]
         self.halo_position = self.halo_positions[snap_ind, hind]
+        self.halo_velocity = self.halo_velocities[snap_ind, hind]
         self.redshift = self.redshifts[snap_ind]
         if hasattr(self, 'particle_masses'):
             particle_mass = self.particle_masses[snap_ind]
@@ -222,7 +224,8 @@ class OrbitDecomposition:
             self.inds_orb = myin1d(snapshot_data.ids, self.ids_orb)
             self.coords_orb = snapshot_data.coordinates[self.inds_orb] - \
                 self.halo_position
-            self.vels_orb = snapshot_data.velocities[self.inds_orb]
+            self.vels_orb = snapshot_data.velocities[self.inds_orb] - \
+                self.halo_velocity
             if isinstance(snapshot_data.masses, np.ndarray):
                 self.masses_orb = snapshot_data.masses[self.inds_orb]
             else:
@@ -238,7 +241,8 @@ class OrbitDecomposition:
             self.inds_inf = myin1d(snapshot_data.ids, self.ids_inf)
             self.coords_inf = snapshot_data.coordinates[self.inds_inf] - \
                 self.halo_position
-            self.vels_inf = snapshot_data.velocities[self.inds_inf]
+            self.vels_inf = snapshot_data.velocities[self.inds_inf] - \
+                self.halo_velocity
             if isinstance(snapshot_data.masses, np.ndarray):
                 self.masses_inf = snapshot_data.masses[self.inds_inf]
             else:
