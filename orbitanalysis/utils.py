@@ -20,3 +20,12 @@ def magnitude(vectors, return_magnitude=True, return_unit_vectors=False):
         return vmags
     elif return_unit_vectors:
         return vectors / vmags[:, np.newaxis]
+
+
+def recenter_coordinates(position, boxsize):
+    if isinstance(boxsize, (float, np.floating, int, np.integer)):
+        boxsize = boxsize * np.ones(3)
+    for dim, bs in enumerate(boxsize):
+        position[np.argwhere((position[:, dim] > bs/2)), dim] -= bs
+        position[np.argwhere((position[:, dim] < -bs/2)), dim] += bs
+    return position

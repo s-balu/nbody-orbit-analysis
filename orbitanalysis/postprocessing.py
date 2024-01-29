@@ -3,8 +3,10 @@ import h5py
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
+from pathos.multiprocessing import ProcessingPool as Pool
+from tqdm import tqdm
 
-from orbitanalysis.utils import myin1d, magnitude
+from orbitanalysis.utils import myin1d, magnitude, recenter_coordinates
 
 
 class OrbitDecomposition:
@@ -12,10 +14,11 @@ class OrbitDecomposition:
     def __init__(self, filename):
 
         self.datafile = h5py.File(filename, 'r+')
+        self.filename = filename
 
         self.halo_indices = self.datafile['HaloIndices'][:]
         if 'ParticleMasses' in self.datafile:
-            self.particle_masses = self.datafile['ParticleMasses']
+            self.particle_masses = self.datafile['ParticleMasses'][:]
         self.halo_positions = self.datafile['Positions'][:]
         self.halo_radii = self.datafile['Radii'][:]
         self.halo_velocities = self.datafile['BulkVelocities'][:]
@@ -26,20 +29,59 @@ class OrbitDecomposition:
         self.particle_type = self.datafile['Options'].attrs['PartType']
         self.snapshot_directory = self.datafile['Options'].attrs['SnapDir']
 
-    def correct_counts_and_save_to_file(self, angle_condition=np.pi/2):
+    def correct_counts_and_save_to_file(self, angle_condition=np.pi/2,
+                                        npool=None):
 
-        for halo_index in self.halo_indices[-1]:
-            self.correct_counts(halo_index, angle_condition, save_to_file=True)
+        def correct_halo_counts(halo_index):
+            return self.correct_counts(halo_index, angle_condition, npool)
+
+        hindices = self.halo_indices[-1]
+        if npool is None or npool == 1:
+            for hindex in tqdm(hindices):
+                _ = correct_halo_counts(hindex)
+        else:
+            self.datafile.close()
+            del self.datafile
+            NCHUNKS = int(np.ceil(len(hindices) / npool))
+            for CHUNK in tqdm(range(NCHUNKS)):
+                hindices_chunk = hindices[CHUNK*npool:(CHUNK+1)*npool]
+                corrected_counts = Pool(npool).map(
+                    correct_halo_counts, hindices_chunk)
+                with h5py.File(self.filename, 'r+') as datafile:
+                    for hindex, cc in zip(hindices_chunk, corrected_counts):
+                        hind = np.argwhere(
+                            self.halo_indices[-1] == hindex).flatten()[0]
+                        no_progen = np.count_nonzero(
+                            self.halo_indices[:, hind] == -1)
+                        snapshot_numbers = self.snapshot_numbers[no_progen:]
+                        for snap_num, cci in zip(snapshot_numbers, cc):
+                            sdata = datafile[
+                                'Snapshot{}'.format('%0.3d' % snap_num)]
+                            if 'CorrectedCounts' not in sdata:
+                                sdata.create_dataset(
+                                    'CorrectedCounts', data=cci)
+                            else:
+                                sdata['CorrectedCounts'][:] = cci
+                del datafile
+            self.datafile = h5py.File(self.filename, 'r+')
 
     def correct_counts(self, halo_index, angle_condition=np.pi/2,
                        snapshot_number=None, filtered_ids=None,
-                       save_to_file=False):
+                       save_to_file=False, npool=None):
+
+        if npool is None:
+            datafile = self.datafile
+        else:
+            datafile = h5py.File(self.filename, 'r')
+            save_to_file = False
 
         if filtered_ids is None:
             filtered_ids = self.filter_pericenters(
-                halo_index, angle_condition, final_snapshot=snapshot_number)
+                halo_index, angle_condition, final_snapshot=None,
+                datafile=datafile)
 
-        hind = np.argwhere(self.halo_indices[-1] == halo_index).flatten()[0]
+        hind = np.argwhere(
+            self.halo_indices[-1] == halo_index).flatten()[0]
 
         if snapshot_number is None:
             no_progen = np.count_nonzero(self.halo_indices[:, hind] == -1)
@@ -47,19 +89,17 @@ class OrbitDecomposition:
         else:
             snapshot_numbers = np.array([snapshot_number])
 
+        corrected_counts_list = []
         for snap_num in snapshot_numbers:
 
-            if snapshot_number is None:
-                snap_ind = np.argwhere(
-                    snapshot_numbers == snap_num).flatten()[0]
-                filtered_ids_snap = np.concatenate(filtered_ids[:snap_ind + 1])
-            else:
-                filtered_ids_snap = np.concatenate(filtered_ids)
+            snap_ind = np.argwhere(
+                snapshot_numbers == snap_num).flatten()[0]
+            filtered_ids_snap = np.concatenate(filtered_ids[:snap_ind + 1])
 
             filtered_ids_unique, filter_counts = np.unique(
                 filtered_ids_snap, return_counts=True)
 
-            sdata = self.datafile['Snapshot{}'.format('%0.3d' % snap_num)]
+            sdata = datafile['Snapshot{}'.format('%0.3d' % snap_num)]
             orb_offsets = sdata['OrbitingOffsets'][()]
             inf_offsets = sdata['InfallingOffsets'][()]
             orb_ranges = list(zip(orb_offsets[:-1], inf_offsets))
@@ -75,33 +115,39 @@ class OrbitDecomposition:
 
             departed = np.setdiff1d(
                 filtered_ids_unique, ids_orb, assume_unique=True)
-            departed_inds = myin1d(filtered_ids_unique, departed)
+            departed_inds = myin1d(
+                filtered_ids_unique, departed, kind='table')
             filter_ids_unique_ = np.delete(
                 filtered_ids_unique, departed_inds)
             filter_counts_ = np.delete(filter_counts, departed_inds)
-            inds_filter = myin1d(ids_orb, filter_ids_unique_)
+            inds_filter = myin1d(ids_orb, filter_ids_unique_, kind='table')
+
+            counts_corrected = np.copy(
+                sdata['Counts'][count_slice][inds_filter])
+            counts_corrected -= filter_counts_
+            counts_corrected[counts_corrected < 0] = 0
+
+            corrected_counts = np.copy(sdata['Counts'])
+            corrected_counts[count_slice][inds_filter] = counts_corrected
 
             if save_to_file:
                 if 'CorrectedCounts' not in sdata:
                     sdata.create_dataset(
-                        'CorrectedCounts', data=np.copy(sdata['Counts'][:]))
-
-                counts_corrected = np.copy(
-                    sdata['Counts'][count_slice][inds_filter])
-                counts_corrected -= filter_counts_
-                counts_corrected[counts_corrected < 0] = 0
-
-                temp = np.copy(sdata['CorrectedCounts'])
-                temp[count_slice][inds_filter] = counts_corrected
-                sdata['CorrectedCounts'][:] = temp
+                        'CorrectedCounts', data=corrected_counts)
+                else:
+                    sdata['CorrectedCounts'][:] = corrected_counts
             else:
-                counts = np.copy(sdata['Counts'][count_slice])
-                counts[inds_filter] -= filter_counts_
-                counts[counts < 0] = 0
-                return counts
+                corrected_counts_list.append(corrected_counts)
+        if snapshot_number is None:
+            return corrected_counts_list
+        else:
+            return corrected_counts_list[0]
 
     def filter_pericenters(self, halo_index, angle_condition,
-                           final_snapshot=None):
+                           final_snapshot=None, datafile=None):
+
+        if datafile is None:
+            datafile = self.datafile
 
         hind = np.argwhere(self.halo_indices[-1] == halo_index).flatten()[0]
         no_progen = np.count_nonzero(self.halo_indices[:, hind] == -1)
@@ -114,7 +160,7 @@ class OrbitDecomposition:
         peri_ids = []
         peri_angles = []
         for ii, snapshot_number in enumerate(snapshot_numbers):
-            sdata = self.datafile[
+            sdata = datafile[
                 'Snapshot{}'.format('%0.3d' % snapshot_number)]
 
             orb_offsets = sdata['OrbitingOffsets'][()]
@@ -132,14 +178,14 @@ class OrbitDecomposition:
             counts = sdata['Counts'][count_slice]
             if ii > 0:
                 departed = np.setdiff1d(ids_orb_prev, ids_orb)
-                departed_inds = np.in1d(ids_orb_prev, departed)
+                departed_inds = np.in1d(ids_orb_prev, departed, kind='table')
                 ids_orb_prev_ = np.delete(ids_orb_prev, departed_inds)
                 counts_prev_ = np.delete(counts_prev, departed_inds)
 
-                matched_inds = myin1d(ids_orb, ids_orb_prev_)
+                matched_inds = myin1d(ids_orb, ids_orb_prev_, kind='table')
                 first_peri_ids = np.setdiff1d(
                     ids_orb, ids_orb_prev_, assume_unique=True)
-                first_peri_inds = myin1d(ids_orb, first_peri_ids)
+                first_peri_inds = myin1d(ids_orb, first_peri_ids, kind='table')
 
                 peri_inds = np.where(counts[matched_inds] > counts_prev_)[0]
                 nth_peri_ids = ids_orb[matched_inds[peri_inds]]
@@ -162,10 +208,10 @@ class OrbitDecomposition:
                 ids2, angles2 = peri_ids[-jj], peri_angles[-jj]
 
                 diff = np.setdiff1d(ids1, ids2)
-                diff_inds = myin1d(ids1, diff)
+                diff_inds = myin1d(ids1, diff, kind='table')
                 ids1_ = np.delete(ids1, diff_inds)
                 angles1_ = np.delete(angles1, diff_inds)
-                matched_inds = myin1d(ids2, ids1_)
+                matched_inds = myin1d(ids2, ids1_, kind='table')
 
                 filter_inds = np.where(
                     (angles1_ - angles2[matched_inds]) < angle_condition)[0]
@@ -177,7 +223,7 @@ class OrbitDecomposition:
             filter_ids_ii.append(ids1[filter_inds_remaining])
 
             filtered_ids.append(np.concatenate(filter_ids_ii))
-        filtered_ids.append(np.array([], dtype=type(filtered_ids[0][0])))
+        filtered_ids.append(np.array([], dtype=type(ids_orb[0])))
         filtered_ids = [
             filtered_ids[-ii] for ii in range(1, len(filtered_ids)+1)]
 
@@ -221,9 +267,11 @@ class OrbitDecomposition:
             if 'Masses' in sdata:
                 self.masses_orb = sdata['Masses'][orb_slice]
         else:
-            self.inds_orb = myin1d(snapshot_data.ids, self.ids_orb)
-            self.coords_orb = snapshot_data.coordinates[self.inds_orb] - \
-                self.halo_position
+            self.inds_orb = myin1d(
+                snapshot_data.ids, self.ids_orb, kind='table')
+            self.coords_orb = recenter_coordinates(
+                snapshot_data.coordinates[self.inds_orb] - self.halo_position,
+                snapshot_data.box_size)
             self.vels_orb = snapshot_data.velocities[self.inds_orb] - \
                 self.halo_velocity
             if isinstance(snapshot_data.masses, np.ndarray):
@@ -238,9 +286,11 @@ class OrbitDecomposition:
             if 'Masses' in sdata:
                 self.masses_inf = sdata['Masses'][inf_slice]
         else:
-            self.inds_inf = myin1d(snapshot_data.ids, self.ids_inf)
-            self.coords_inf = snapshot_data.coordinates[self.inds_inf] - \
-                self.halo_position
+            self.inds_inf = myin1d(
+                snapshot_data.ids, self.ids_inf, kind='table')
+            self.coords_inf = recenter_coordinates(
+                snapshot_data.coordinates[self.inds_inf] - self.halo_position,
+                snapshot_data.box_size)
             self.vels_inf = snapshot_data.velocities[self.inds_inf] - \
                 self.halo_velocity
             if isinstance(snapshot_data.masses, np.ndarray):
@@ -284,7 +334,7 @@ class OrbitDecomposition:
                             ylabel=r'$y/R_{200}$', display=False,
                             savefile=None):
 
-        if counts_to_plot is 'all':
+        if counts_to_plot == 'all':
             counts_to_plot = np.unique(self.counts)
 
         clrmap = mpl.colormaps[colormap]
@@ -354,7 +404,7 @@ class OrbitDecomposition:
         r_inf = magnitude(self.coords_inf)
         vr_inf = np.einsum('...i,...i', self.vels_inf, self.coords_inf) / r_inf
 
-        if counts_to_plot is 'all':
+        if counts_to_plot == 'all':
             counts_to_plot = np.unique(self.counts)
 
         clrmap = mpl.colormaps[colormap]
