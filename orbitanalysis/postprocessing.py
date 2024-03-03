@@ -233,7 +233,9 @@ class OrbitDecomposition:
                                            use_corrected=False,
                                            angle_condition=None,
                                            filtered_ids=None,
-                                           snapshot_data=None):
+                                           snapshot_data=None,
+                                           load_coords=True, load_vels=True,
+                                           load_masses=True):
 
         hind = np.argwhere(self.halo_indices[-1] == halo_index).flatten()[0]
 
@@ -261,42 +263,45 @@ class OrbitDecomposition:
             self.masses_inf = particle_mass
 
         self.ids_orb = sdata['IDs'][orb_slice]
+        self.ids_inf = sdata['IDs'][inf_slice]
         if snapshot_data is None:
-            self.coords_orb = sdata['Coordinates'][orb_slice]
-            self.vels_orb = sdata['Velocities'][orb_slice]
-            if 'Masses' in sdata:
-                self.masses_orb = sdata['Masses'][orb_slice]
+            if load_coords:
+                self.coords_orb = sdata['Coordinates'][orb_slice]
+                self.coords_inf = sdata['Coordinates'][inf_slice]
+            if load_vels:
+                self.vels_orb = sdata['Velocities'][orb_slice]
+                self.vels_inf = sdata['Velocities'][inf_slice]
+            if load_masses:
+                if 'Masses' in sdata:
+                    self.masses_orb = sdata['Masses'][orb_slice]
+                if 'Masses' in sdata:
+                    self.masses_inf = sdata['Masses'][inf_slice]
         else:
             self.inds_orb = myin1d(
                 snapshot_data.ids, self.ids_orb, kind='table')
-            self.coords_orb = recenter_coordinates(
-                snapshot_data.coordinates[self.inds_orb] - self.halo_position,
-                snapshot_data.box_size)
-            self.vels_orb = snapshot_data.velocities[self.inds_orb] - \
-                self.halo_velocity
-            if isinstance(snapshot_data.masses, np.ndarray):
-                self.masses_orb = snapshot_data.masses[self.inds_orb]
-            else:
-                self.masses_orb = snapshot_data.masses
-
-        self.ids_inf = sdata['IDs'][inf_slice]
-        if snapshot_data is None:
-            self.coords_inf = sdata['Coordinates'][inf_slice]
-            self.vels_inf = sdata['Velocities'][inf_slice]
-            if 'Masses' in sdata:
-                self.masses_inf = sdata['Masses'][inf_slice]
-        else:
             self.inds_inf = myin1d(
                 snapshot_data.ids, self.ids_inf, kind='table')
-            self.coords_inf = recenter_coordinates(
-                snapshot_data.coordinates[self.inds_inf] - self.halo_position,
-                snapshot_data.box_size)
-            self.vels_inf = snapshot_data.velocities[self.inds_inf] - \
-                self.halo_velocity
-            if isinstance(snapshot_data.masses, np.ndarray):
-                self.masses_inf = snapshot_data.masses[self.inds_inf]
-            else:
-                self.masses_inf = snapshot_data.masses
+            if load_coords:
+                self.coords_orb = recenter_coordinates(
+                    snapshot_data.coordinates[self.inds_orb] -
+                    self.halo_position, snapshot_data.box_size)
+                self.coords_inf = recenter_coordinates(
+                    snapshot_data.coordinates[self.inds_inf] -
+                    self.halo_position, snapshot_data.box_size)
+            if load_vels:
+                self.vels_orb = snapshot_data.velocities[self.inds_orb] - \
+                    self.halo_velocity
+                self.vels_inf = snapshot_data.velocities[self.inds_inf] - \
+                    self.halo_velocity
+            if load_masses:
+                if isinstance(snapshot_data.masses, np.ndarray):
+                    self.masses_orb = snapshot_data.masses[self.inds_orb]
+                else:
+                    self.masses_orb = snapshot_data.masses
+                if isinstance(snapshot_data.masses, np.ndarray):
+                    self.masses_inf = snapshot_data.masses[self.inds_inf]
+                else:
+                    self.masses_inf = snapshot_data.masses
 
         angle_condition = 0.0 if angle_condition is None else angle_condition
         if not use_corrected and (
@@ -314,20 +319,27 @@ class OrbitDecomposition:
         inds_remove = np.argwhere(self.counts == 0).flatten()
         if len(inds_remove) != 0:
             self.ids_inf = np.append(self.ids_inf, self.ids_orb[inds_remove])
-            self.coords_inf = np.append(
-                self.coords_inf, self.coords_orb[inds_remove], axis=0)
-            self.vels_inf = np.append(
-                self.vels_inf, self.vels_orb[inds_remove], axis=0)
-            if isinstance(self.masses_inf, np.ndarray):
-                self.masses_inf = np.append(
-                    self.masses_inf, self.masses_orb[inds_remove])
+            if load_coords:
+                self.coords_inf = np.append(
+                    self.coords_inf, self.coords_orb[inds_remove], axis=0)
+            if load_vels:
+                self.vels_inf = np.append(
+                    self.vels_inf, self.vels_orb[inds_remove], axis=0)
+            if load_masses:
+                if isinstance(self.masses_inf, np.ndarray):
+                    self.masses_inf = np.append(
+                        self.masses_inf, self.masses_orb[inds_remove])
 
             self.ids_orb = np.delete(self.ids_orb, inds_remove)
-            self.coords_orb = np.delete(self.coords_orb, inds_remove, axis=0)
-            self.vels_orb = np.delete(self.vels_orb, inds_remove, axis=0)
-            if isinstance(self.masses_orb, np.ndarray):
-                self.masses_orb = np.delete(self.masses_orb, inds_remove)
-            self.counts = np.delete(self.counts, inds_remove)
+            if load_coords:
+                self.coords_orb = np.delete(
+                    self.coords_orb, inds_remove, axis=0)
+            if load_vels:
+                self.vels_orb = np.delete(self.vels_orb, inds_remove, axis=0)
+            if load_masses:
+                if isinstance(self.masses_orb, np.ndarray):
+                    self.masses_orb = np.delete(self.masses_orb, inds_remove)
+                self.counts = np.delete(self.counts, inds_remove)
 
     def plot_position_space(self, projection='xy', colormap='inferno_r',
                             counts_to_plot='all', xlabel=r'$x/R_{200}$',

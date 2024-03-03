@@ -158,14 +158,12 @@ def find_main_progenitors(halo_pids, tracked_ids, npool):
     halo_pids_flat = np.hstack(halo_pids)
 
     tracked_ids_flat = np.hstack(tracked_ids)
-    present_tot = np.in1d(halo_pids_flat, tracked_ids_flat, kind='table')
-    pcounts_tot = np.split(present_tot, np.cumsum(lengths))[:-1]
-    npresent_tot = np.array([np.count_nonzero(pc) for pc in pcounts_tot])
-    occupied = np.argwhere(npresent_tot != 0).flatten()
-    unoccupied = np.argwhere(npresent_tot == 0).flatten()
+    present_all = np.in1d(halo_pids_flat, tracked_ids_flat, kind='table')
+    pcounts_all = np.split(present_all, np.cumsum(lengths))[:-1]
+    npresent_all = np.array([np.count_nonzero(pc) for pc in pcounts_all])
+    occupied = np.argwhere(npresent_all != 0).flatten()
+    unoccupied = np.argwhere(npresent_all == 0).flatten()
 
-    # for i in sorted(unoccupied, reverse=True):
-    #     del halo_pids[i]
     halo_pids_occupied = [halo_pids[i] for i in occupied]
     if len(halo_pids) == 0:
         return None
