@@ -1,106 +1,95 @@
 import numpy as np
 import time
-import gc
 import h5py
-from pathos.multiprocessing import ProcessingPool as Pool
 
-from orbitanalysis.collate import collate_orbit_history
-from orbitanalysis.utils import myin1d, recenter_coordinates
+from orbitanalysis.utils import myin1d, recenter_coordinates, vector_norm
 
 
-def track_orbits(load_halo_particle_ids, load_snapshot_object, regions,
-                 snapshot, catalogue, haloids, n_radii, savefile,
-                 mode='pericentric', initial_snapshot_number=0, tree=None,
-                 collate=True, save_properties=True, npool=None, verbose=True):
+def track_orbits(main_branches, snapshot_numbers, load_snapshot_object,
+                 regions, n_radii, savefile, mode='pericentric', verbose=True):
+
     """
     """
+
+    if len(main_branches) != len(snapshot_numbers):
+        raise ValueError(
+            "Number of halo main branch nodes does not equal the number of "
+            "snapshot numbers supplied. Must have len(main_branches) == "
+            "len(snapshot_numbers).")
+    if (mode != 'pericentric') and (mode != 'apocentric'):
+        raise ValueError(
+            "Orbit detection mode not recognized. Please specify either "
+            "'pericentric' or 'apocentric'.")
 
     tstart = time.time()
 
-    # intermediate file
-    ext = savefile.split('.')[-1]
-    if ext == 'h5' or ext == 'hdf5':
-        savefile_ = savefile[:-(len(ext) + 1)] + '_onthefly.' + ext
-    else:
-        savefile_ = savefile + '_onthefly'
+    initialize_savefile(
+        savefile, snapshot_numbers[1:], main_branches, n_radii, verbose)
 
-    coords, vels, bulk_vels, radial_vels_next, ids_central = region_frame(
-        snapshot, verbose)
-    ids_next = snapshot.ids
-    region_offsets_next = snapshot.region_offsets
-
-    initialize_savefile(savefile_, snapshot.ids, coords, vels, snapshot.masses,
-                        snapshot.region_offsets, snapshot.redshift, haloids,
-                        snapshot.region_positions,
-                        snapshot.region_radii / n_radii,
-                        bulk_vels,
-                        snapshot.snapshot_number,
-                        snapshot.snapshot_number-initial_snapshot_number+1,
-                        snapshot.snapshot_path, snapshot.particle_type,
-                        n_radii, save_properties, verbose)
-
-    snapnums_reversed = np.flip(
-        np.arange(initial_snapshot_number, snapshot.snapshot_number))
-    for ii, snapnum in enumerate(snapnums_reversed):
+    for i, (halo_ids, snapshot_number) in enumerate(
+            zip(main_branches, snapshot_numbers)):
 
         if verbose:
             print('-' * 30, '\n')
 
-        # get halo IDs for main progenitors at current snapshot
-        haloids_new_, catalogue, snapnum = check_for_and_find_main_progenitors(
-            load_halo_particle_ids, snapshot, catalogue, snapnum, ids_central,
-            tree is None, npool, verbose)
-        if tree is not None:
-            haloids_new_ = tree[ii+1]
-        if haloids_new_ is None:
-            break
-        has_progen = np.argwhere(haloids_new_ > -1).flatten()
-        haloids_new = haloids_new_[has_progen]
+        halo_exists = np.argwhere(halo_ids != -1).flatten()
+        halo_ids_ = halo_ids[halo_exists]
 
-        # discard ids and radial vels of halos in next snapshot (snapnum + 1)
-        # that have no progenitor
-        slices = np.array(list(zip(
-            region_offsets_next[:-1], region_offsets_next[1:])))
-        ids_next = np.concatenate([
-            ids_next[start:end] for start, end in slices[has_progen]])
-        radial_vels_next = np.concatenate([
-            radial_vels_next[start:end] for start, end in slices[has_progen]])
-        lens = [0] + [end-start for start, end in slices[has_progen]]
-        region_offsets_next = np.cumsum(lens)
+        region_positions, region_radii = regions(
+            snapshot_number, halo_ids_, n_radii)
 
-        # get regions at current snapshot
-        region_positions, region_radii = regions(catalogue, haloids_new)
         snapshot = load_snapshot_object(
-            snapshot, snapnum, region_positions, n_radii * region_radii,
-            verbose)
+            snapshot_number, region_positions, region_radii)
 
-        coords, vels, bulk_vels, radial_vels, ids_central = region_frame(
-            snapshot, verbose)
+        coords, radial_vels, bulk_vels = region_frame(snapshot, verbose)
 
-        radii = -np.ones(len(haloids))
-        radii[has_progen] = snapshot.region_radii / n_radii
-        positions = -np.ones((len(haloids), 3))
-        positions[has_progen, :] = snapshot.region_positions
-        region_vels = -np.ones((len(haloids), 3))
-        region_vels[has_progen, :] = bulk_vels
+        if i > 0:
 
-        # compare radial velocities between current and next snapshot
-        orbiting_ids_at_snapshot_, orbiting_offsets = \
-            compare_radial_velocities(
-                mode, snapshot.ids, ids_next, radial_vels, radial_vels_next,
-                snapshot.region_offsets, region_offsets_next, verbose)
+            progen_exists = np.argwhere(halo_ids_prev != -1).flatten()
+            progen_inds = myin1d(halo_exists, progen_exists)
+            noprogen = np.setdiff1d(halo_exists, progen_exists)
+            noprogen_inds = myin1d(halo_exists, noprogen)
 
-        save_to_file(savefile_, orbiting_ids_at_snapshot_, orbiting_offsets,
-                     snapshot.ids, coords, vels, snapshot.masses,
-                     snapshot.region_offsets, snapshot.redshift, positions,
-                     radii, region_vels, snapnum, haloids_new_, ii+1,
-                     save_properties, verbose)
+            region_slices = np.array(list(zip(
+                snapshot.region_offsets[:-1], snapshot.region_offsets[1:])))
+            region_slices_desc = region_slices[progen_inds]
+            region_slices_noprogen = region_slices[noprogen_inds]
+            # coords_ = np.concatenate(
+            #     [coords[slice(*sl)] for sl in region_slices[progen_inds]],
+            #     axis=0)
+            radial_vels_desc = np.concatenate(
+                [radial_vels[slice(*sl)] for sl in region_slices_desc], axis=0)
 
-        ids_next, radial_vels_next, region_offsets_next = \
-            snapshot.ids, radial_vels, snapshot.region_offsets
+            orbiting_ids, orbiting_inds, orbiting_offsets, entered_ids, \
+                entered_inds, entered_offsets, departed_ids, \
+                departed_offsets = compare_radial_velocities(
+                    snapshot.ids, ids_prev, radial_vels_desc, radial_vels_prev,
+                    snapshot.region_offsets, region_offsets_prev, mode,
+                    verbose)
 
-    if collate:
-        collate_orbit_history(savefile, save_properties, verbose)
+            angles = 2*np.pi*np.ones(len(orbiting_inds))
+
+            halo_positions = -np.ones((len(halo_ids), 3))
+            halo_positions[progen_exists] = region_positions
+            halo_radii = -np.ones(len(halo_ids))
+            halo_radii[progen_exists] = region_radii / n_radii
+            halo_velocities = -np.ones((len(halo_ids), 3))
+            halo_velocities[progen_exists] = bulk_vels
+
+            save_to_file(
+                savefile, orbiting_ids, orbiting_offsets, entered_ids,
+                entered_offsets, departed_ids, departed_offsets, angles,
+                snapshot.redshift, halo_positions, halo_radii, halo_velocities,
+                main_branches[-1][progen_exists], snapshot_number, i-1,
+                verbose)
+        else:
+
+            ids_angle = snapshot.ids
+            coords_angle = coords
+            angle_offsets = snapshot.region_offsets
+
+        ids_prev, radial_vels_prev, region_offsets_prev, halo_ids_prev = \
+            snapshot.ids, radial_vels, snapshot.region_offsets, halo_ids
 
     if verbose:
         print('Finished orbiting decomposition (took {} s)\n'.format(
@@ -119,8 +108,7 @@ def region_frame(snapshot, verbose):
         recenter_coordinates(
             snapshot.coordinates[start:end]-p, snapshot.box_size)
         for (start, end), p in zip(slices, snapshot.region_positions)], axis=0)
-    del snapshot.coordinates
-    gc.collect()
+
     region_vels, region_bulk_vels = [], []
     if isinstance(snapshot.masses, np.ndarray):
         for start, end in slices:
@@ -136,179 +124,94 @@ def region_frame(snapshot, verbose):
             region_vels.append(snapshot.velocities[start:end] - bulk_vel)
             region_bulk_vels.append(bulk_vel)
     region_vels = np.concatenate(region_vels, axis=0)
-    del snapshot.velocities
-    gc.collect()
+
     rads = np.sqrt(np.einsum('...i,...i', region_coords, region_coords))
     radial_vels = np.einsum('...i,...i', region_vels, region_coords) / rads
-    ids_tracked = [snapshot.ids[np.argsort(rads[start:end])[:100]+start]
-                   for start, end in slices]
 
     if verbose:
         print('Transformed to region frames (took {} s)\n'.format(
             time.time() - t0))
 
-    return region_coords, region_vels, np.array(region_bulk_vels), \
-        radial_vels, ids_tracked
+    return region_coords, radial_vels, np.array(region_bulk_vels)
 
 
-def find_main_progenitors(halo_pids, tracked_ids, npool):
-
-    lengths = np.array([len(pids) for pids in halo_pids])
-    halonums = np.arange(len(halo_pids))
-    halo_pids_flat = np.hstack(halo_pids)
-
-    tracked_ids_flat = np.hstack(tracked_ids)
-    present_all = np.in1d(halo_pids_flat, tracked_ids_flat, kind='table')
-    pcounts_all = np.split(present_all, np.cumsum(lengths))[:-1]
-    npresent_all = np.array([np.count_nonzero(pc) for pc in pcounts_all])
-    occupied = np.argwhere(npresent_all != 0).flatten()
-    unoccupied = np.argwhere(npresent_all == 0).flatten()
-
-    halo_pids_occupied = [halo_pids[i] for i in occupied]
-    if len(halo_pids) == 0:
-        return None
-    halo_pids_flat = np.hstack(halo_pids_occupied)
-    lengths = np.delete(lengths, unoccupied)
-    halonums = np.delete(halonums, unoccupied)
-
-    def get_progenitor(ii):
-        ids = tracked_ids[ii]
-        present = np.in1d(halo_pids_flat, ids, kind='table')
-        pcounts = np.split(present, np.cumsum(lengths))[:-1]
-        npresent = [np.count_nonzero(pc) for pc in pcounts]
-
-        if np.all(npresent == 0):
-            return -1
-        else:
-            return halonums[np.argmax(npresent)]
-    if npool is None:
-        haloids_new = []
-        for jj in range(len(tracked_ids)):
-            haloids_new.append(get_progenitor(jj))
-    else:
-        haloids_new = Pool(npool).map(
-            get_progenitor, np.arange(len(tracked_ids)))
-    haloids_new = np.array(haloids_new)
-
-    return haloids_new
-
-
-def check_for_and_find_main_progenitors(func, snapshot, catalogue, snapnum,
-                                        ids_central, return_main_progenitors,
-                                        npool, verbose):
-    if verbose:
-        print('Finding main progenitors at snapshot {}...'.format(snapnum))
-        t0 = time.time()
-
-    halo_pids, catalogue_ = func(snapshot, catalogue, snapnum)
-    if return_main_progenitors:
-        if halo_pids is not None:
-            main_progenitors = find_main_progenitors(
-                halo_pids, ids_central, npool)
-            if verbose:
-                print('Found main progenitors (took {} s)\n'.format(
-                    time.time() - t0))
-            return main_progenitors, catalogue_, snapnum
-        else:
-            return None, None, snapnum + 1
-    else:
-        return None, catalogue_, snapnum
-
-
-def compare_radial_velocities(mode, ids, ids_next, radial_vels,
-                              radial_vels_next, offsets, offsets_next,
+def compare_radial_velocities(ids, ids_prev, radial_vels, radial_vels_prev,
+                              region_offsets, region_offsets_prev, mode,
                               verbose):
 
     if verbose:
-        print('Starting comparison...')
+        print('Identifying {}ers...'.format(mode[:8]))
         t0 = time.time()
 
-    slices = list(zip(offsets[:-1], offsets[1:]))
-    slices_next = list(zip(offsets_next[:-1], offsets_next[1:]))
+    slices_prev = list(zip(region_offsets_prev[:-1], region_offsets_prev[1:]))
+    slices = list(zip(region_offsets[:-1], region_offsets[1:]))
 
     orbiting_ids = []
-    for sl, sl_next in zip(slices, slices_next):
-        departed = np.setdiff1d(ids[slice(*sl)], ids_next[slice(*sl_next)])
-        inds_departed = np.where(np.in1d(ids[slice(*sl)], departed))[0]
-        radial_vels_ = np.delete(radial_vels[slice(*sl)], inds_departed)
-        ids_ = np.delete(ids[slice(*sl)], inds_departed)
+    orbiting_inds = []
+    entered_ids = []
+    entered_inds = []
+    departed_ids = []
+    for sl_prev, sl in zip(slices_prev, slices):
+        departed = np.setdiff1d(ids_prev[slice(*sl_prev)], ids[slice(*sl)])
+        inds_departed = np.where(
+            np.in1d(ids_prev[slice(*sl_prev)], departed))[0]
+        radial_vels_prev_ = np.delete(
+            radial_vels_prev[slice(*sl_prev)], inds_departed)
+        ids_prev_ = np.delete(ids_prev[slice(*sl_prev)], inds_departed)
 
-        inds_match = myin1d(ids_next[slice(*sl_next)], ids_)
-        radial_vels_match = radial_vels_next[slice(*sl_next)][inds_match]
+        inds_match = myin1d(ids[slice(*sl)], ids_prev_)
+        radial_vels_match = radial_vels[slice(*sl)][inds_match]
 
         if mode == 'pericentric':
-            cond = (radial_vels_ < 0) & (radial_vels_match > 0)
+            cond = (radial_vels_prev_ < 0) & (radial_vels_match > 0)
         elif mode == 'apocentric':
-            cond = (radial_vels_ > 0) & (radial_vels_match < 0)
-        else:
-            raise ValueError("Orbit detection mode not recognized. Please "
-                             "select either 'pericentric' or 'apocentric'.")
+            cond = (radial_vels_prev_ > 0) & (radial_vels_match < 0)
         orbinds = np.argwhere(cond).flatten()
-        orbiting_ids.append(ids_[orbinds])
+        orbids = ids_prev_[orbinds]
+        orbiting_ids.append(orbids)
+        orbiting_inds.append(myin1d(ids[slice(*sl)], orbids))
+
+        entids = np.setdiff1d(ids[slice(*sl)], ids_prev[slice(*sl_prev)])
+        entered_ids.append(entids)
+        entered_inds.append(myin1d(ids[slice(*sl)], entids))
+        departed_ids.append(departed)
 
     if verbose:
-        print('Finished comparison (took {} s)\n'.format(time.time() - t0))
+        print('Finished identifying {}ers (took {} s)\n'.format(
+            mode[:8], time.time() - t0))
 
-    lens = [0] + [len(orbids) for orbids in orbiting_ids]
-    return np.concatenate(orbiting_ids), np.cumsum(lens)
+    orbiting_lens = [0] + [len(orbids) for orbids in orbiting_ids]
+    entered_lens = [0] + [len(entered) for entered in entered_ids]
+    departed_lens = [0] + [len(departed) for departed in departed_ids]
+    return np.concatenate(orbiting_ids), np.concatenate(orbiting_inds), \
+        np.cumsum(orbiting_lens), np.concatenate(entered_ids), \
+        np.concatenate(entered_inds), np.cumsum(entered_lens), \
+        np.concatenate(departed_ids), np.cumsum(departed_lens)
 
 
-def initialize_savefile(savefile, ids, coords, vels, masses, offsets, redshift,
-                        hids, pos, radii, bulk_vel, snapshot_number, nsnaps,
-                        snapdir, particle_type, n_radii, save_properties,
+def initialize_savefile(savefile, snapshot_numbers, main_branches, n_radii,
                         verbose):
-
-    if verbose:
-        print('Initializing savefile...')
-        t0 = time.time()
 
     with h5py.File(savefile, 'w') as hf:
 
-        gsnap_new = hf.create_group(
-            'Snapshot{}'.format('%0.3d' % snapshot_number))
-        gsnap_new.create_dataset('IDs', data=ids)
-        gsnap_new.create_dataset('Coordinates', data=coords)
-        if save_properties:
-            gsnap_new.create_dataset('Velocities', data=vels)
-            if isinstance(masses, np.ndarray):
-                gsnap_new.create_dataset('Masses', data=masses)
-        gsnap_new.create_dataset('Offsets', data=offsets)
-
-        redshifts = np.empty(nsnaps)
-        haloids = np.empty((nsnaps, len(hids)), dtype=np.int32)
-        positions = np.empty((nsnaps, len(hids), 3))
-        radiis = np.empty((nsnaps, len(hids)))
-        bulk_velocities = np.empty((nsnaps, len(hids), 3))
-
-        redshifts[0] = redshift
-        haloids[0, :] = hids
-        radiis[0, :] = radii
-        positions[0, :, :] = pos
-        bulk_velocities[0, :, :] = bulk_vel
-
-        hf.create_dataset('Redshifts', data=redshifts)
-        hf.create_dataset('HaloIDs', data=haloids)
-        hf.create_dataset('Positions', data=positions)
-        hf.create_dataset('Radii', data=radiis)
-        hf.create_dataset('BulkVelocities', data=bulk_velocities)
-        hf.create_dataset('ParticleMasses', data=np.zeros(nsnaps))
-        if not isinstance(masses, np.ndarray):
-            hf['ParticleMasses'][0] = masses
-
-        head = hf.create_group('Options')
-        opts = [('SnapDir', snapdir),
-                ('PartType', particle_type),
-                ('NumRadii', n_radii)]
-        for attr, val in opts:
-            head.attrs[attr] = val
+        hf.create_dataset('snapshot_numbers', data=snapshot_numbers)
+        hf.create_dataset('redshifts', data=np.empty(len(snapshot_numbers)))
+        hf.create_dataset('main_branches', data=main_branches)
+        hf.create_dataset('halo_radii', data=np.empty(np.shape(main_branches)))
+        hf.create_dataset(
+            'halo_positions', data=np.empty(np.shape(main_branches) + (3,)))
+        hf.create_dataset(
+            'halo_velocities', data=np.empty(np.shape(main_branches) + (3,)))
+        hf.attrs['multiple_of_radii'] = n_radii
 
     if verbose:
-        print('Savefile initialized (took {} s)\n'.format(time.time() - t0))
+        print('Savefile initialized\n')
 
 
-def save_to_file(savefile, orbiting_ids_at_snapshot, orbiting_offsets, ids,
-                 coords, vels, masses, offsets, redshift, pos, radii, bulk_vel,
-                 snapshot_number, progens, index, save_properties, verbose):
+def save_to_file(savefile, orbiting_ids, orbiting_offsets, infalling_ids,
+                 infalling_offsets, departed_ids, departed_offsets,
+                 angles, redshift, halo_positions, halo_radii, halo_velocities,
+                 halo_ids_final, snapshot_number, index, verbose):
 
     if verbose:
         print('Saving to file...')
@@ -316,27 +219,24 @@ def save_to_file(savefile, orbiting_ids_at_snapshot, orbiting_offsets, ids,
 
     with h5py.File(savefile, 'r+') as hf:
 
-        gsnap = hf['Snapshot{}'.format('%0.3d' % (snapshot_number + 1))]
-        gsnap.create_dataset('OrbitingIDs', data=orbiting_ids_at_snapshot)
-        gsnap.create_dataset('OrbitingOffsets', data=orbiting_offsets)
+        gsnap = hf.create_group(
+            'snapshot_{}'.format('%0.3d' % snapshot_number))
+        gsnap.create_dataset('orbiting_offsets', data=orbiting_offsets)
+        gsnap.create_dataset('orbiting_IDs', data=orbiting_ids)
+        gsnap.create_dataset('angles', data=angles)
 
-        gsnap_new = hf.create_group(
-            'Snapshot{}'.format('%0.3d' % snapshot_number))
-        gsnap_new.create_dataset('IDs', data=ids)
-        gsnap_new.create_dataset('Coordinates', data=coords)
-        if save_properties:
-            gsnap_new.create_dataset('Velocities', data=vels)
-            if isinstance(masses, np.ndarray):
-                gsnap_new.create_dataset('Masses', data=masses)
-        gsnap_new.create_dataset('Offsets', data=offsets)
+        gsnap.create_dataset('infalling_offsets', data=infalling_offsets)
+        gsnap.create_dataset('infalling_IDs', data=infalling_ids)
 
-        hf['Redshifts'][index] = redshift
-        hf['HaloIDs'][index, :] = progens
-        hf['Radii'][index, :] = radii
-        hf['Positions'][index, :, :] = pos
-        hf['BulkVelocities'][index, :, :] = bulk_vel
-        if not isinstance(masses, np.ndarray):
-            hf['ParticleMasses'][index] = masses
+        gsnap.create_dataset('departed_offsets', data=departed_offsets)
+        gsnap.create_dataset('departed_IDs', data=departed_ids)
+
+        gsnap.create_dataset('halo_ids_final', data=halo_ids_final)
+
+        hf['redshifts'][index] = redshift
+        hf['halo_radii'][index, :] = halo_radii
+        hf['halo_positions'][index, :, :] = halo_positions
+        hf['halo_velocities'][index, :, :] = halo_velocities
 
     if verbose:
         print('Saved to file (took {} s)\n'.format(time.time() - t0))

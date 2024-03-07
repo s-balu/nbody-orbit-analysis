@@ -12,11 +12,11 @@ def myin1d(a, b, kind=None):
     return np.where(loc)[0][order]
 
 
-def magnitude(vectors, return_magnitude=True, return_unit_vectors=False):
+def vector_norm(vectors, return_norm=True, return_unit_vectors=False):
     vmags = np.sqrt(np.einsum('...i,...i', vectors, vectors))
-    if return_magnitude and return_unit_vectors:
+    if return_norm and return_unit_vectors:
         return vmags, vectors / vmags[:, np.newaxis]
-    elif return_magnitude:
+    elif return_norm:
         return vmags
     elif return_unit_vectors:
         return vectors / vmags[:, np.newaxis]
