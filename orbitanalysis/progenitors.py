@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 from orbitanalysis.utils import recenter_coordinates, myin1d
 
@@ -21,6 +23,10 @@ def get_tracked_ids(snapshot, n=100):
 def find_main_progenitors(halo_pids, halo_offsets, tracked_ids,
                           tracked_offsets):
 
+    tracked_ids_, unique_inds = np.unique(tracked_ids, return_index=True)
+    tracked_ids = -np.ones(len(tracked_ids), dtype=int)
+    tracked_ids[unique_inds] = tracked_ids_
+
     halo_diffs = np.diff(halo_offsets)
     halo_lens = np.append(halo_diffs, len(halo_pids)-halo_offsets[-1])
     tracked_diffs = np.diff(tracked_offsets)
@@ -32,7 +38,6 @@ def find_main_progenitors(halo_pids, halo_offsets, tracked_ids,
 
     intersect_inds = np.where(np.in1d(tracked_ids, halo_pids, kind='table'))[0]
     tracked_ids_present = tracked_ids[intersect_inds]
-    tracked_ids_present = tracked_ids_present.astype(np.uint64)
 
     inds = myin1d(halo_pids, tracked_ids_present, kind='table')
     halo_numbers_progen_ = halo_number[inds]
