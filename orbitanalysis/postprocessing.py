@@ -18,15 +18,16 @@ class OrbitDecomposition:
             self.region_positions = datafile['region_positions'][:]
             self.region_radii = datafile['region_radii'][:]
             self.bulk_velocities = datafile['bulk_velocities'][:]
-            self.redshifts = datafile['redshifts'][:]
             self.snapshot_numbers = datafile['snapshot_numbers'][:]
+            if 'box_size' in datafile.attrs:
+                self.box_size = datafile.attrs['box_size']
 
     def get_halo_decomposition_at_snapshot(self, halo_id, snapshot_number,
                                            snapshot_data, angle_cut=0.0):
 
         """
         Get the orbiting and infalling components of a halo at a particular
-        redshift.
+        snapshot.
 
         Parameters
         ----------
@@ -44,8 +45,6 @@ class OrbitDecomposition:
             * velocities : (N, 3) ndarray - the corresponding velocities.
             * masses : (N,) ndarray or float - the corresponding masses, or a
                        single mass value if all particles have the same mass.
-            * box_size : float or (3,) array_like - the simulation box side
-                         length(s).
         angle_cut : float, optional
             Particles that advance about the halo center by less than this
             angle between peri/apocenters will not have that peri/apocenter
@@ -124,9 +123,13 @@ class OrbitDecomposition:
             snapshot_data['ids'], ids_infalling)
 
         inds_orbiting = myin1d(snapshot_data['ids'], self.ids_orbiting)
-        self.coords_orbiting = recenter_coordinates(
-            snapshot_data['coordinates'][inds_orbiting] - self.region_position,
-            snapshot_data['box_size'])
+        if hasattr(self, "box_size"):
+            self.coords_orbiting = recenter_coordinates(
+                snapshot_data['coordinates'][inds_orbiting] -
+                self.region_position, self.box_size)
+        else:
+            self.coords_orbiting = snapshot_data['coordinates'][
+                inds_orbiting] - self.region_position
         self.vels_orbiting = snapshot_data['velocities'][inds_orbiting] - \
             self.bulk_velocity
         if isinstance(snapshot_data['masses'], np.ndarray):
@@ -135,9 +138,13 @@ class OrbitDecomposition:
             self.masses_orbiting = snapshot_data['masses']
 
         inds_infalling = myin1d(snapshot_data['ids'], self.ids_infalling)
-        self.coords_infalling = recenter_coordinates(
-            snapshot_data['coordinates'][inds_infalling] - self.region_position,
-            snapshot_data['box_size'])
+        if hasattr(self, "box_size"):
+            self.coords_infalling = recenter_coordinates(
+                snapshot_data['coordinates'][inds_infalling] -
+                self.region_position, self.box_size)
+        else:
+            self.coords_infalling = snapshot_data['coordinates'][
+                inds_infalling] - self.region_position
         self.vels_infalling = snapshot_data['velocities'][inds_infalling] - \
             self.bulk_velocity
         if isinstance(snapshot_data['masses'], np.ndarray):

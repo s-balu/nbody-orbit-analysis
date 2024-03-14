@@ -19,7 +19,7 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
     main_branches : (n_snap, n_halo) array_like
         An array of dimension (number of snapshots) x (number of halos)
         containing the IDs of the main branch progenitors for the halos
-        selected at the final redshift. The array must be in the same order as
+        selected at the final snapshot. The array must be in the same order as
         `snapshot_numbers`. Wherever a progenitor does not exist (before the
         beginning of a branch) a value of -1 must be placed.
     regions : function
@@ -42,18 +42,15 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
 
         * ids : (N,) ndarray - a list of the IDs of all particles in all
                 regions, arranged in blocks.
-        * coordinates : (N, 3) ndarray - a list of the coordinates of all
-                        particles in all regions, arranged in blocks.
-        * velocities : (N, 3) ndarray - a list of the velocities of all
-                       particles in all regions, arranged in blocks.
-        * masses : (N,) ndarray or float - the masses of all particles in all
-                   regions. Can be supplied as an array arranged in blocks, or
-                   as a float if all particles have the same mass.
+        * coordinates : (N, 3) ndarray - the corresponding coordinates.
+        * velocities : (N, 3) ndarray - the corresponding velocities.
+        * masses : (N,) ndarray or float - the corresponding masses. Can be
+                   supplied as an array arranged in blocks, or as a float if
+                   all particles have the same mass.
         * region_offsets : (n_halos,) ndarray - the indices of the start of
                            each region block.
         * box_size : float or (3,) array_like - the simulation box side
-                     length(s).
-        * redshift: float - the reshift corresponding to the snapshot.
+                     length(s) when using a periodic box (optional).
     savefile : str
         The filename at which to save the result of the orbit tracking. The
         data is saved in HDF5 format.
@@ -137,14 +134,17 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
             region_radii_[progen_exists] = region_radii
             bulk_velocities_ = -np.ones((len(halo_ids), 3))
             bulk_velocities_[progen_exists] = bulk_vels
+            if 'box_size' in snapshot:
+                box_size = snapshot['box_size']
+            else:
+                box_size = None
 
             save_to_file(
                 savefile, orbiting_ids, orbiting_offsets, entered_ids,
                 entered_offsets, departed_ids, departed_offsets,
-                orbiting_angle_changes, snapshot['redshift'],
-                region_positions_, region_radii_, bulk_velocities_,
-                main_branches[-1][progen_exists], snapshot_number, i-1,
-                verbose)
+                orbiting_angle_changes, region_positions_, region_radii_,
+                bulk_velocities_, main_branches[-1][progen_exists],
+                snapshot_number, box_size, i-1, verbose)
 
             progen_exists_prev = progen_exists
             ids_angle_prev = matched_ids
@@ -182,10 +182,16 @@ def region_frame(snapshot, region_slices, region_positions, verbose):
         print('Transforming to region frames...')
         t0 = time.time()
 
-    region_coords = np.concatenate([
-        recenter_coordinates(
-            snapshot['coordinates'][start:end]-p, snapshot['box_size'])
-        for (start, end), p in zip(region_slices, region_positions)], axis=0)
+    if 'box_size' in snapshot:
+        region_coords = np.concatenate([
+            recenter_coordinates(
+                snapshot['coordinates'][start:end]-p, snapshot['box_size'])
+            for (start, end), p in zip(region_slices, region_positions)],
+            axis=0)
+    else:
+        region_coords = np.concatenate([
+            snapshot['coordinates'][start:end]-p for (start, end), p in zip(
+                region_slices, region_positions)], axis=0)
 
     region_vels, region_bulk_vels = [], []
     if isinstance(snapshot['masses'], np.ndarray):
@@ -398,7 +404,6 @@ def initialize_savefile(savefile, snapshot_numbers, main_branches, verbose):
     with h5py.File(savefile, 'w') as hf:
 
         hf.create_dataset('snapshot_numbers', data=snapshot_numbers)
-        hf.create_dataset('redshifts', data=np.empty(len(snapshot_numbers)))
         hf.create_dataset('main_branches', data=main_branches)
         hf.create_dataset(
             'region_radii', data=np.empty(np.shape(main_branches)))
@@ -413,9 +418,8 @@ def initialize_savefile(savefile, snapshot_numbers, main_branches, verbose):
 
 def save_to_file(savefile, orbiting_ids, orbiting_offsets, infalling_ids,
                  infalling_offsets, departed_ids, departed_offsets,
-                 angles, redshift, region_positions, region_radii,
-                 bulk_velocities, halo_ids_final, snapshot_number, index,
-                 verbose):
+                 angles, region_positions, region_radii, bulk_velocities,
+                 halo_ids_final, snapshot_number, box_size, index, verbose):
 
     if verbose:
         print('Saving to file...')
@@ -437,10 +441,12 @@ def save_to_file(savefile, orbiting_ids, orbiting_offsets, infalling_ids,
 
         gsnap.create_dataset('halo_ids_final', data=halo_ids_final)
 
-        hf['redshifts'][index] = redshift
         hf['region_radii'][index, :] = region_radii
         hf['region_positions'][index, :, :] = region_positions
         hf['bulk_velocities'][index, :, :] = bulk_velocities
+
+        if index == 0 and box_size is not None:
+            hf.attrs['box_size'] = box_size
 
     if verbose:
         print('Saved to file (took {} s)\n'.format(time.time() - t0))

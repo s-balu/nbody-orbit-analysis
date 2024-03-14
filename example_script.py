@@ -21,7 +21,8 @@ def regions(snapshot_number, haloids):
     """
     A function that takes a snapshot and a list of halo IDs and returns the
     coordinates of the centers of the halos and the radii of the regions within
-    which to track orbits.
+    which to track orbits. In this case, the positions are those of the minimum
+    potential and the radii are four times R_200c.
 
     """
 
@@ -61,8 +62,7 @@ def load_snapshot_data(snapshot_number, region_positions, region_radii):
         snapshot['velocities'] = snapshot_data['Velocities'][region_inds]
         snapshot['masses'] = snapshot_data['Masses'][region_inds]
         snapshot['region_offsets'] = region_offsets
-        snapshot['box_size'] = box_size
-        snapshot['redshift'] = snapshot_data.attrs['Redshift']
+        snapshot['box_size'] = box_size  # for periodic boxes. Optional.
 
     return snapshot
 
@@ -81,15 +81,15 @@ snapdata = load_snapshot_data(
 
 # Read orbit decomposition using an angle cut of pi/2
 orb_decomp.get_halo_decomposition_at_snapshot(
-    halo_id=halo_id, snapshot_number=48, snapshot_data=snapdata,
-    angle_cut=np.pi/2)
+    halo_id=halo_id, snapshot_number=final_snapshot_number,
+    snapshot_data=snapdata, angle_cut=np.pi/2)
 
 # Plotting
 orb_decomp.plot_position_space(
     projection='xy', colormap='rainbow_r', counts_to_plot='all',
-    xlabel=r'$x/R_{200}$', ylabel=r'$y/R_{200}$', display=False,
+    xlabel=r'$x/R_{200}$', ylabel=r'$y/(4R_{200})$', display=False,
     savefile=savedir + '/position_space.png')
 orb_decomp.plot_phase_space(
-    colormap='rainbow_r', counts_to_plot='all', radius_label=r'$r/R_{200}$',
+    colormap='rainbow_r', counts_to_plot='all', radius_label=r'$r/(4R_{200})$',
     radial_velocity_label=r'$v_r\,\,({\rm km\, s}^{-1})$', display=False,
     savefile=savedir + '/phase_space.png')

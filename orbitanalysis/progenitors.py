@@ -9,8 +9,8 @@ def get_central_particle_ids(snapshot, halo_positions, n=100):
 
     Parameters
     ----------
-    snapshot : object
-        An object with the following attributes:
+    snapshot : dict
+        A dictionary with the following elements:
 
         * ids : (N,) ndarray - a list of the IDs of all particles in all
                 central regions, arranged in blocks.
@@ -36,14 +36,14 @@ def get_central_particle_ids(snapshot, halo_positions, n=100):
     """
 
     slices = list(
-        zip(snapshot.region_offsets[:-1], snapshot.region_offsets[1:]))
+        zip(snapshot['region_offsets'][:-1], snapshot['region_offsets'][1:]))
     region_coords = np.concatenate([
         recenter_coordinates(
-            snapshot.coordinates[start:end]-p, snapshot.box_size)
+            snapshot['coordinates'][start:end]-p, snapshot['box_size'])
         for (start, end), p in zip(slices, halo_positions)], axis=0)
 
     rads = np.sqrt(np.einsum('...i,...i', region_coords, region_coords))
-    central_ids = [snapshot.ids[np.argsort(rads[start:end])[:n]+start]
+    central_ids = [snapshot['ids'][np.argsort(rads[start:end])[:n]+start]
                    for start, end in slices]
     offsets = np.cumsum([0] + [len(ids) for ids in central_ids])[:-1]
     return np.hstack(central_ids), offsets
