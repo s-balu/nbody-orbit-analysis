@@ -87,9 +87,9 @@ orb_decomp.get_halo_decomposition_at_snapshot(
 # Plotting
 orb_decomp.plot_position_space(
     projection='xy', colormap='rainbow_r', counts_to_plot='all',
-    xlabel=r'$x/R_{200}$', ylabel=r'$y/(4R_{200})$', display=False,
+    xlabel=r'$x/(4R_{200})$', ylabel=r'$y/(4R_{200})$', display=False,
     savefile=savedir + '/position_space.png')
 orb_decomp.plot_phase_space(
     colormap='rainbow_r', counts_to_plot='all', radius_label=r'$r/(4R_{200})$',
-    radial_velocity_label=r'$v_r\,\,({\rm km\, s}^{-1})$', display=False,
-    savefile=savedir + '/phase_space.png')
+    radial_velocity_label=r'$v_r\,\,({\rm km\, s}^{-1})$', logr=True,
+    display=False, savefile=savedir + '/phase_space.png')

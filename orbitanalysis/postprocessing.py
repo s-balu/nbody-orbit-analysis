@@ -153,8 +153,8 @@ class OrbitDecomposition:
             self.masses_infalling = snapshot_data['masses']
 
     def plot_position_space(self, projection='xy', colormap='rainbow_r',
-                            counts_to_plot='all', xlabel=r'$x/R_{200}$',
-                            ylabel=r'$y/R_{200}$', display=False,
+                            counts_to_plot='all', xlabel=r'$x/R_{\rm region}$',
+                            ylabel=r'$y/R_{\rm region}$', display=False,
                             savefile=None):
 
         """
@@ -168,15 +168,19 @@ class OrbitDecomposition:
         clrmap = mpl.colormaps[colormap]
 
         fig, axs = plt.subplots(
-            ncols=4, figsize=(22.5, 7), gridspec_kw={
-                'width_ratios': [20, 20, 20, 1]})
+            ncols=4, figsize=(22.5, 7), width_ratios=[20, 20, 20, 1])
         cbar_ax = axs[3]
-        norm = plt.Normalize(vmin=1, vmax=np.max(counts_to_plot))
+        max_n = np.max(counts_to_plot)
+        norm = mpl.colors.LogNorm(vmin=1, vmax=max_n)
         mpl.colorbar.ColorbarBase(
             cbar_ax, cmap=clrmap, norm=norm, orientation='vertical')
         cbar_ax.set_title(r'$N_{\rm orbits}$', fontsize=18)
-        cbar_ax.tick_params(labelsize=18)
-        cbar_ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        cbar_ax.tick_params()
+        ticks = np.unique(
+            (10**np.linspace(np.log10(1), np.log10(max_n), 16)).astype(int))
+        cbar_ax.set_yticks(ticks)
+        cbar_ax.set_yticklabels(
+            [r'${}$'.format(x) for x in ticks], fontsize=18)
 
         if projection == 'xy':
             proj = [0, 1]
@@ -190,8 +194,10 @@ class OrbitDecomposition:
 
         # orbiting & infalling
         for ii in [0, 2]:
-            axs[ii].scatter(self.coords_infalling[:, proj[0]]/self.region_radius,
-                            self.coords_infalling[:, proj[1]]/self.region_radius,
+            axs[ii].scatter(self.coords_infalling[:, proj[0]] /
+                            self.region_radius,
+                            self.coords_infalling[:, proj[1]] /
+                            self.region_radius,
                             color='grey', alpha=0.4, marker='.', s=0.2)
         for ii in [0, 1]:
             for n in counts_to_plot[counts_to_plot > 0]:
@@ -200,32 +206,34 @@ class OrbitDecomposition:
                                 self.region_radius,
                                 self.coords_orbiting[norb][:, proj[1]] /
                                 self.region_radius,
-                                color=clrmap(norm(n-1)), alpha=0.4, marker='.',
+                                color=clrmap(norm(n)), alpha=0.4, marker='.',
                                 s=0.2)
 
         lim = max(np.abs(np.array(list(axs[0].get_xlim()) +
                                   list(axs[0].get_ylim()))))
         titles = ['orbiting + infalling', 'orbiting', 'infalling']
-        for ax, title in zip(axs, titles):
+        for jj, (ax, title) in enumerate(zip(axs, titles)):
             ax.set_xlim(-lim, lim)
             ax.set_ylim(-lim, lim)
             ax.set_xlabel(xlabel, fontsize=18)
-            ax.set_ylabel(ylabel, fontsize=18)
             ax.tick_params(labelsize=18)
             ax.set_title(title, fontsize=18)
-        fig.tight_layout()
-
+            if jj == 0:
+                ax.set_ylabel(ylabel, fontsize=18)
+            else:
+                ax.set_yticklabels([])
+        fig.subplots_adjust(wspace=0)
         if savefile is not None:
-            fig.savefig(savefile, dpi=300)
+            fig.savefig(savefile, bbox_inches='tight', dpi=300)
         if display:
             plt.show()
         else:
             plt.close(fig)
 
     def plot_phase_space(self, colormap='rainbow_r', counts_to_plot='all',
-                         radius_label=r'$r/R_{200}$',
+                         radius_label=r'$r/R_{\rm region}$',
                          radial_velocity_label=r'$v_r\,\,({\rm km\, s}^{-1})$',
-                         display=False, savefile=None):
+                         logr=True, display=False, savefile=None):
 
         """
         Plot the phase space distribution of the particles, colored by number
@@ -245,15 +253,19 @@ class OrbitDecomposition:
         clrmap = mpl.colormaps[colormap]
 
         fig, axs = plt.subplots(
-            ncols=4, figsize=(22.5, 7), gridspec_kw={
-                'width_ratios': [20, 20, 20, 1]})
+            ncols=4, figsize=(22.5, 7), width_ratios=[20, 20, 20, 1])
         cbar_ax = axs[3]
-        norm = plt.Normalize(vmin=1, vmax=np.max(counts_to_plot))
+        max_n = np.max(counts_to_plot)
+        norm = mpl.colors.LogNorm(vmin=1, vmax=max_n)
         mpl.colorbar.ColorbarBase(
             cbar_ax, cmap=clrmap, norm=norm, orientation='vertical')
         cbar_ax.set_title(r'$N_{\rm orbits}$', fontsize=18)
-        cbar_ax.tick_params(labelsize=18)
-        cbar_ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        cbar_ax.tick_params()
+        ticks = np.unique(
+            (10**np.linspace(np.log10(1), np.log10(max_n), 16)).astype(int))
+        cbar_ax.set_yticks(ticks)
+        cbar_ax.set_yticklabels(
+            [r'${}$'.format(x) for x in ticks], fontsize=18)
 
         # orbiting & infalling
         for ii in [0, 2]:
@@ -263,23 +275,30 @@ class OrbitDecomposition:
             for n in counts_to_plot[counts_to_plot > 0]:
                 norb = np.where(self.counts == n)[0]
                 axs[ii].scatter(r_orb[norb]/self.region_radius, vr_orb[norb],
-                                color=clrmap(norm(n-1)), alpha=0.4, marker='.',
+                                color=clrmap(norm(n)), alpha=0.4, marker='.',
                                 s=0.2)
 
-        xlim = max(np.abs(np.array(list(axs[0].get_xlim()))))
+        xlims = (min(np.abs(np.array(list(axs[0].get_xlim())))),
+                 max(np.abs(np.array(list(axs[0].get_xlim())))))
         ylim = max(np.abs(np.array(list(axs[0].get_ylim()))))
         titles = ['orbiting + infalling', 'orbiting', 'infalling']
-        for ax, title in zip(axs, titles):
-            ax.set_xlim(0, xlim)
+        for jj, (ax, title) in enumerate(zip(axs, titles)):
+            if logr:
+                ax.set_xlim(*xlims)
+                ax.set_xscale('log')
+            else:
+                ax.set_xlim(0, xlims[1])
             ax.set_ylim(-ylim, ylim)
             ax.set_xlabel(radius_label, fontsize=18)
-            ax.set_ylabel(radial_velocity_label, fontsize=18)
             ax.tick_params(labelsize=18)
             ax.set_title(title, fontsize=18)
-        fig.tight_layout()
-
+            if jj == 0:
+                ax.set_ylabel(radial_velocity_label, fontsize=18)
+            else:
+                ax.set_yticklabels([])
+        fig.subplots_adjust(wspace=0)
         if savefile is not None:
-            fig.savefig(savefile, dpi=300)
+            fig.savefig(savefile, bbox_inches='tight', dpi=300)
         if display:
             plt.show()
         else:

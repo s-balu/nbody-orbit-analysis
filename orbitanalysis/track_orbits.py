@@ -74,7 +74,9 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
 
     tstart = time.time()
 
-    main_branches = np.atleast_2d(main_branches).T
+    main_branches = np.asarray(main_branches)
+    if main_branches.ndim == 1:
+        main_branches = main_branches[:, np.newaxis]
     snapshot_numbers = np.asarray(snapshot_numbers)
     order = np.argsort(snapshot_numbers)
     snapshot_numbers = snapshot_numbers[order]
