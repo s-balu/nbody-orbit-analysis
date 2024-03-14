@@ -15,24 +15,52 @@ class OrbitDecomposition:
 
         with h5py.File(filename, 'r') as datafile:
             self.main_branches = datafile['main_branches'][:]
-            self.halo_positions = datafile['halo_positions'][:]
-            self.halo_radii = datafile['halo_radii'][:]
-            self.halo_velocities = datafile['halo_velocities'][:]
+            self.region_positions = datafile['region_positions'][:]
+            self.region_radii = datafile['region_radii'][:]
+            self.bulk_velocities = datafile['bulk_velocities'][:]
             self.redshifts = datafile['redshifts'][:]
             self.snapshot_numbers = datafile['snapshot_numbers'][:]
-            self.multiple_of_radii = datafile.attrs['multiple_of_radii']
 
-    def get_halo_decomposition_at_snapshot(self, snapshot_number, halo_id,
-                                           snapshot_data,
-                                           angle_condition=np.pi/2):
+    def get_halo_decomposition_at_snapshot(self, halo_id, snapshot_number,
+                                           snapshot_data, angle_cut=0.0):
+
+        """
+        Get the orbiting and infalling components of a halo at a particular
+        redshift.
+
+        Parameters
+        ----------
+        halo_id : int
+            The ID of the halo.
+        snapshot_number : int
+            The snapshot number at which to retrieve the halo decompoaition.
+        snapshot_data : object
+            An object with the following attributes:
+
+            * ids : (N,) ndarray - list of particle IDs that contains at least
+                    all those that belong to the halo region at the specified
+                    snapshot number.
+            * coordinates : (N, 3) ndarray - the corresponding coordinates.
+            * velocities : (N, 3) ndarray - the corresponding velocities.
+            * masses : (N,) ndarray or float - the corresponding masses, or a
+                       single mass value if all particles have the same mass.
+            * box_size : float or (3,) array_like - the simulation box side
+                         length(s).
+        angle_cut : float, optional
+            Particles that advance about the halo center by less than this
+            angle between peri/apocenters will not have that peri/apocenter
+            counted. This is designed to remove spurious peri/apocenters from
+            orbits within subhalos.
+
+        """
 
         hind = np.argwhere(self.main_branches[-1] == halo_id).flatten()[0]
         sind = np.argwhere(
             self.snapshot_numbers == snapshot_number).flatten()[0]
 
-        self.halo_position = self.halo_positions[sind, hind]
-        self.halo_radius = self.halo_radii[sind, hind]
-        self.halo_velocity = self.halo_velocities[sind, hind]
+        self.region_position = self.region_positions[sind, hind]
+        self.region_radius = self.region_radii[sind, hind]
+        self.bulk_velocity = self.bulk_velocities[sind, hind]
 
         with h5py.File(self.filename, 'r') as datafile:
 
@@ -56,7 +84,7 @@ class OrbitDecomposition:
                 angles = sdata['angles'][slice(*orbiting_lims)]
                 ids_orbiting = np.append(
                     ids_orbiting, orbids[
-                        np.argwhere(angles > angle_condition).flatten()])
+                        np.argwhere(angles > angle_cut).flatten()])
 
                 infalling_lims = sdata['infalling_offsets'][hind_:hind_+2]
                 infids = sdata['infalling_IDs'][slice(*infalling_lims)]
@@ -96,10 +124,10 @@ class OrbitDecomposition:
 
         inds_orbiting = myin1d(snapshot_data.ids, self.ids_orbiting)
         self.coords_orbiting = recenter_coordinates(
-            snapshot_data.coordinates[inds_orbiting] - self.halo_position,
+            snapshot_data.coordinates[inds_orbiting] - self.region_position,
             snapshot_data.box_size)
         self.vels_orbiting = snapshot_data.velocities[inds_orbiting] - \
-            self.halo_velocity
+            self.bulk_velocity
         if isinstance(snapshot_data.masses, np.ndarray):
             self.masses_orbiting = snapshot_data.masses[inds_orbiting]
         else:
@@ -107,19 +135,24 @@ class OrbitDecomposition:
 
         inds_infalling = myin1d(snapshot_data.ids, self.ids_infalling)
         self.coords_infalling = recenter_coordinates(
-            snapshot_data.coordinates[inds_infalling] - self.halo_position,
+            snapshot_data.coordinates[inds_infalling] - self.region_position,
             snapshot_data.box_size)
         self.vels_infalling = snapshot_data.velocities[inds_infalling] - \
-            self.halo_velocity
+            self.bulk_velocity
         if isinstance(snapshot_data.masses, np.ndarray):
             self.masses_infalling = snapshot_data.masses[inds_infalling]
         else:
             self.masses_infalling = snapshot_data.masses
 
-    def plot_position_space(self, projection='xy', colormap='inferno_r',
+    def plot_position_space(self, projection='xy', colormap='rainbow_r',
                             counts_to_plot='all', xlabel=r'$x/R_{200}$',
                             ylabel=r'$y/R_{200}$', display=False,
                             savefile=None):
+
+        """
+        Plot the spatial distribution of the particles, colored by number of
+        orbits.
+        """
 
         if counts_to_plot == 'all':
             counts_to_plot = np.unique(self.counts)
@@ -149,16 +182,16 @@ class OrbitDecomposition:
 
         # orbiting & infalling
         for ii in [0, 2]:
-            axs[ii].scatter(self.coords_infalling[:, proj[0]]/self.halo_radius,
-                            self.coords_infalling[:, proj[1]]/self.halo_radius,
+            axs[ii].scatter(self.coords_infalling[:, proj[0]]/self.region_radius,
+                            self.coords_infalling[:, proj[1]]/self.region_radius,
                             color='grey', alpha=0.4, marker='.', s=0.2)
         for ii in [0, 1]:
             for n in counts_to_plot[counts_to_plot > 0]:
                 norb = np.where(self.counts == n)[0]
                 axs[ii].scatter(self.coords_orbiting[norb][:, proj[0]] /
-                                self.halo_radius,
+                                self.region_radius,
                                 self.coords_orbiting[norb][:, proj[1]] /
-                                self.halo_radius,
+                                self.region_radius,
                                 color=clrmap(norm(n-1)), alpha=0.4, marker='.',
                                 s=0.2)
 
@@ -181,10 +214,15 @@ class OrbitDecomposition:
         else:
             plt.close(fig)
 
-    def plot_phase_space(self, colormap='inferno_r', counts_to_plot='all',
+    def plot_phase_space(self, colormap='rainbow_r', counts_to_plot='all',
                          radius_label=r'$r/R_{200}$',
                          radial_velocity_label=r'$v_r\,\,({\rm km\, s}^{-1})$',
                          display=False, savefile=None):
+
+        """
+        Plot the phase space distribution of the particles, colored by number
+        of orbits.
+        """
 
         r_orb = vector_norm(self.coords_orbiting)
         vr_orb = np.einsum(
@@ -211,12 +249,12 @@ class OrbitDecomposition:
 
         # orbiting & infalling
         for ii in [0, 2]:
-            axs[ii].scatter(r_inf/self.halo_radius, vr_inf, color='grey',
+            axs[ii].scatter(r_inf/self.region_radius, vr_inf, color='grey',
                             alpha=0.4, marker='.', s=0.2)
         for ii in [0, 1]:
             for n in counts_to_plot[counts_to_plot > 0]:
                 norb = np.where(self.counts == n)[0]
-                axs[ii].scatter(r_orb[norb]/self.halo_radius, vr_orb[norb],
+                axs[ii].scatter(r_orb[norb]/self.region_radius, vr_orb[norb],
                                 color=clrmap(norm(n-1)), alpha=0.4, marker='.',
                                 s=0.2)
 

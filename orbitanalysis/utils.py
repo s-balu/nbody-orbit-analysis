@@ -5,7 +5,6 @@ def myin1d(a, b, kind=None):
     """
     Returns the indices of a with values that are also in b, in the order that
     those elements appear in b.
-
     """
     loc = np.in1d(a, b, kind=kind)
     order = a[loc].argsort()[b.argsort().argsort()]
@@ -23,6 +22,9 @@ def vector_norm(vectors, return_norm=True, return_unit_vectors=False):
 
 
 def recenter_coordinates(position, boxsize):
+    """
+    Center a periodic simulation box on a specified position.
+    """
     if isinstance(boxsize, (float, np.floating, int, np.integer)):
         boxsize = boxsize * np.ones(3)
     for dim, bs in enumerate(boxsize):
