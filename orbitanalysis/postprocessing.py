@@ -34,8 +34,8 @@ class OrbitDecomposition:
             The ID of the halo.
         snapshot_number : int
             The snapshot number at which to retrieve the halo decompoaition.
-        snapshot_data : object
-            An object with the following attributes:
+        snapshot_data : dict
+            A dictionary with the following elements:
 
             * ids : (N,) ndarray - list of particle IDs that contains at least
                     all those that belong to the halo region at the specified
@@ -116,33 +116,34 @@ class OrbitDecomposition:
             np.in1d(ids_infalling, inf_departed_ids))[0]
         ids_infalling = np.delete(ids_infalling, inf_departed_inds)
 
-        self.ids_orbiting = np.intersect1d(snapshot_data.ids, ids_orbiting)
+        self.ids_orbiting = np.intersect1d(snapshot_data['ids'], ids_orbiting)
         inds_contained = myin1d(ids_orbiting, self.ids_orbiting)
         self.counts = counts[inds_contained]
 
-        self.ids_infalling = np.intersect1d(snapshot_data.ids, ids_infalling)
+        self.ids_infalling = np.intersect1d(
+            snapshot_data['ids'], ids_infalling)
 
-        inds_orbiting = myin1d(snapshot_data.ids, self.ids_orbiting)
+        inds_orbiting = myin1d(snapshot_data['ids'], self.ids_orbiting)
         self.coords_orbiting = recenter_coordinates(
-            snapshot_data.coordinates[inds_orbiting] - self.region_position,
-            snapshot_data.box_size)
-        self.vels_orbiting = snapshot_data.velocities[inds_orbiting] - \
+            snapshot_data['coordinates'][inds_orbiting] - self.region_position,
+            snapshot_data['box_size'])
+        self.vels_orbiting = snapshot_data['velocities'][inds_orbiting] - \
             self.bulk_velocity
-        if isinstance(snapshot_data.masses, np.ndarray):
-            self.masses_orbiting = snapshot_data.masses[inds_orbiting]
+        if isinstance(snapshot_data['masses'], np.ndarray):
+            self.masses_orbiting = snapshot_data['masses'][inds_orbiting]
         else:
-            self.masses_orbiting = snapshot_data.masses
+            self.masses_orbiting = snapshot_data['masses']
 
-        inds_infalling = myin1d(snapshot_data.ids, self.ids_infalling)
+        inds_infalling = myin1d(snapshot_data['ids'], self.ids_infalling)
         self.coords_infalling = recenter_coordinates(
-            snapshot_data.coordinates[inds_infalling] - self.region_position,
-            snapshot_data.box_size)
-        self.vels_infalling = snapshot_data.velocities[inds_infalling] - \
+            snapshot_data['coordinates'][inds_infalling] - self.region_position,
+            snapshot_data['box_size'])
+        self.vels_infalling = snapshot_data['velocities'][inds_infalling] - \
             self.bulk_velocity
-        if isinstance(snapshot_data.masses, np.ndarray):
-            self.masses_infalling = snapshot_data.masses[inds_infalling]
+        if isinstance(snapshot_data['masses'], np.ndarray):
+            self.masses_infalling = snapshot_data['masses'][inds_infalling]
         else:
-            self.masses_infalling = snapshot_data.masses
+            self.masses_infalling = snapshot_data['masses']
 
     def plot_position_space(self, projection='xy', colormap='rainbow_r',
                             counts_to_plot='all', xlabel=r'$x/R_{200}$',

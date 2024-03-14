@@ -5,9 +5,8 @@ import h5py
 from orbitanalysis.utils import myin1d, recenter_coordinates
 
 
-def track_orbits(snapshot_numbers, main_branches, regions,
-                 load_snapshot_object, savefile, mode='pericentric',
-                 verbose=True):
+def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
+                 savefile, mode='pericentric', verbose=True):
 
     """
     Track the orbits of particles in gravitating systems.
@@ -31,7 +30,7 @@ def track_orbits(snapshot_numbers, main_branches, regions,
 
         and returns the coordinates of the centers of the halos, and the radii
         of the regions in which to track the orbits.
-    load_snapshot_object : function
+    load_snapshot_data : function
         A function that takes
 
         * a snapshot number,
@@ -39,7 +38,7 @@ def track_orbits(snapshot_numbers, main_branches, regions,
         * the radii of the regions encompassing each halo within which to track
           the orbits,
 
-        and returns an object with the following attributes:
+        and returns a dict with the following elements:
 
         * ids : (N,) ndarray - a list of the IDs of all particles in all
                 regions, arranged in blocks.
@@ -78,8 +77,8 @@ def track_orbits(snapshot_numbers, main_branches, regions,
 
     tstart = time.time()
 
+    main_branches = np.atleast_2d(main_branches).T
     snapshot_numbers = np.asarray(snapshot_numbers)
-    main_branches = np.asarray(main_branches)
     order = np.argsort(snapshot_numbers)
     snapshot_numbers = snapshot_numbers[order]
     main_branches = main_branches[order]
@@ -99,9 +98,10 @@ def track_orbits(snapshot_numbers, main_branches, regions,
         region_positions, region_radii = regions(
             snapshot_number, halo_ids_)
 
-        snapshot = load_snapshot_object(
+        snapshot = load_snapshot_data(
             snapshot_number, region_positions, region_radii)
-        region_offsets = list(snapshot.region_offsets) + [len(snapshot.ids)]
+        region_offsets = list(snapshot['region_offsets']) + [
+            len(snapshot['ids'])]
         region_slices = np.array(
             list(zip(region_offsets[:-1], region_offsets[1:])))
 
@@ -120,9 +120,9 @@ def track_orbits(snapshot_numbers, main_branches, regions,
             orbiting_ids, orbiting_offsets, entered_ids, entered_offsets, \
                 departed_ids, departed_offsets, matched_ids, matched_offsets, \
                 angle_changes = compare_radial_velocities(
-                    snapshot.ids, ids_prev, radial_vels_desc, radial_vels_prev,
-                    rhats, rhats_prev, region_offsets, region_offsets_prev,
-                    mode, verbose)
+                    snapshot['ids'], ids_prev, radial_vels_desc,
+                    radial_vels_prev, rhats, rhats_prev, region_offsets,
+                    region_offsets_prev, mode, verbose)
 
             angles, matched_slices, orbiting_angle_ids, orbiting_angles, \
                 orbiting_angle_slices, orbiting_angle_changes = calc_angles(
@@ -141,8 +141,8 @@ def track_orbits(snapshot_numbers, main_branches, regions,
             save_to_file(
                 savefile, orbiting_ids, orbiting_offsets, entered_ids,
                 entered_offsets, departed_ids, departed_offsets,
-                orbiting_angle_changes, snapshot.redshift, region_positions_,
-                region_radii_, bulk_velocities_,
+                orbiting_angle_changes, snapshot['redshift'],
+                region_positions_, region_radii_, bulk_velocities_,
                 main_branches[-1][progen_exists], snapshot_number, i-1,
                 verbose)
 
@@ -160,7 +160,7 @@ def track_orbits(snapshot_numbers, main_branches, regions,
             orbiting_angles = np.array([])
             orbiting_angle_slices = np.array([])
 
-        ids_prev = snapshot.ids
+        ids_prev = snapshot['ids']
         rhats_prev = rhats
         radial_vels_prev = radial_vels
         region_offsets_prev = region_offsets
@@ -184,22 +184,22 @@ def region_frame(snapshot, region_slices, region_positions, verbose):
 
     region_coords = np.concatenate([
         recenter_coordinates(
-            snapshot.coordinates[start:end]-p, snapshot.box_size)
+            snapshot['coordinates'][start:end]-p, snapshot['box_size'])
         for (start, end), p in zip(region_slices, region_positions)], axis=0)
 
     region_vels, region_bulk_vels = [], []
-    if isinstance(snapshot.masses, np.ndarray):
+    if isinstance(snapshot['masses'], np.ndarray):
         for start, end in region_slices:
             bulk_vel = np.sum(
-                snapshot.masses[start:end][:, np.newaxis] *
-                snapshot.velocities[start:end], axis=0) / \
-                       np.sum(snapshot.masses[start:end])
-            region_vels.append(snapshot.velocities[start:end] - bulk_vel)
+                snapshot['masses'][start:end][:, np.newaxis] *
+                snapshot['velocities'][start:end], axis=0) / \
+                       np.sum(snapshot['masses'][start:end])
+            region_vels.append(snapshot['velocities'][start:end] - bulk_vel)
             region_bulk_vels.append(bulk_vel)
     else:
         for start, end in region_slices:
-            bulk_vel = np.mean(snapshot.velocities[start:end], axis=0)
-            region_vels.append(snapshot.velocities[start:end] - bulk_vel)
+            bulk_vel = np.mean(snapshot['velocities'][start:end], axis=0)
+            region_vels.append(snapshot['velocities'][start:end] - bulk_vel)
             region_bulk_vels.append(bulk_vel)
     region_vels = np.concatenate(region_vels, axis=0)
 
