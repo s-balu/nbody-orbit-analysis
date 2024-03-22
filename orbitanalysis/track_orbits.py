@@ -131,11 +131,11 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
                     orbiting_angle_ids, orbiting_angles, orbiting_angle_slices)
 
             region_positions_ = -np.ones((len(halo_ids), 3))
-            region_positions_[progen_exists] = region_positions
+            region_positions_[halo_exists] = region_positions
             region_radii_ = -np.ones(len(halo_ids))
-            region_radii_[progen_exists] = region_radii
+            region_radii_[halo_exists] = region_radii
             bulk_velocities_ = -np.ones((len(halo_ids), 3))
-            bulk_velocities_[progen_exists] = bulk_vels
+            bulk_velocities_[halo_exists] = bulk_vels
             if 'box_size' in snapshot:
                 box_size = snapshot['box_size']
             else:
@@ -195,21 +195,23 @@ def region_frame(snapshot, region_slices, region_positions, verbose):
             snapshot['coordinates'][start:end]-p for (start, end), p in zip(
                 region_slices, region_positions)], axis=0)
 
-    region_vels, region_bulk_vels = [], []
+    region_vels = np.empty(np.shape(snapshot['velocities']))
+    region_bulk_vels = []
     if isinstance(snapshot['masses'], np.ndarray):
         for start, end in region_slices:
             bulk_vel = np.sum(
                 snapshot['masses'][start:end][:, np.newaxis] *
                 snapshot['velocities'][start:end], axis=0) / \
                        np.sum(snapshot['masses'][start:end])
-            region_vels.append(snapshot['velocities'][start:end] - bulk_vel)
+            region_vels[start:end, :] = snapshot['velocities'][start:end] - \
+                bulk_vel
             region_bulk_vels.append(bulk_vel)
     else:
         for start, end in region_slices:
             bulk_vel = np.mean(snapshot['velocities'][start:end], axis=0)
-            region_vels.append(snapshot['velocities'][start:end] - bulk_vel)
+            region_vels[start:end, :] = snapshot['velocities'][start:end] - \
+                bulk_vel
             region_bulk_vels.append(bulk_vel)
-    region_vels = np.concatenate(region_vels, axis=0)
 
     rads = np.sqrt(np.einsum('...i,...i', region_coords, region_coords))
     radial_vels = np.einsum('...i,...i', region_vels, region_coords) / rads
