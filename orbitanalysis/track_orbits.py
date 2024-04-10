@@ -83,13 +83,14 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
     main_branches = main_branches[order]
 
     initialize_savefile(
-        savefile, snapshot_numbers[1:], main_branches, verbose)
+        savefile, snapshot_numbers[1:], main_branches[1:], verbose)
 
     for i, (halo_ids, snapshot_number) in enumerate(
             zip(main_branches, snapshot_numbers)):
 
         if verbose:
             print('-' * 30, '\n')
+            print('Snapshot {}\n'.format('%03d' % snapshot_number))
 
         halo_exists = np.argwhere(halo_ids != -1).flatten()
         halo_ids_ = halo_ids[halo_exists]
@@ -109,26 +110,24 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
 
         if i > 0:
 
-            progen_exists = np.argwhere(halo_ids_prev != -1).flatten()
             progen_inds = myin1d(halo_exists, progen_exists)
-
             region_slices_desc = region_slices[progen_inds]
-            radial_vels_desc = np.concatenate(
-                [radial_vels[slice(*sl)] for sl in region_slices_desc], axis=0)
 
             orbiting_ids, orbiting_offsets, entered_ids, entered_offsets, \
                 departed_ids, departed_offsets, matched_ids, matched_offsets, \
                 angle_changes = compare_radial_velocities(
-                    snapshot['ids'], ids_prev, radial_vels_desc,
-                    radial_vels_prev, rhats, rhats_prev, region_offsets,
-                    region_offsets_prev, mode, verbose)
+                    snapshot['ids'], ids_prev, radial_vels, radial_vels_prev,
+                    rhats, rhats_prev, region_slices_desc,
+                    region_slices_prev, mode, verbose)
 
             angles, matched_slices, orbiting_angle_ids, orbiting_angles, \
                 orbiting_angle_slices, orbiting_angle_changes = calc_angles(
                     matched_ids, angle_changes, matched_offsets, progen_exists,
                     ids_angle_prev, orbiting_ids, orbiting_offsets,
                     progen_exists_prev, angles, angle_slices_prev,
-                    orbiting_angle_ids, orbiting_angles, orbiting_angle_slices)
+                    orbiting_angle_ids, orbiting_angles, orbiting_angle_slices,
+                    verbose)
+
 
             region_positions_ = -np.ones((len(halo_ids), 3))
             region_positions_[halo_exists] = region_positions
@@ -165,8 +164,8 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
         ids_prev = snapshot['ids']
         rhats_prev = rhats
         radial_vels_prev = radial_vels
-        region_offsets_prev = region_offsets
-        halo_ids_prev = halo_ids
+        region_slices_prev = region_slices
+        progen_exists = halo_exists
 
     if verbose:
         print('Finished orbiting decomposition (took {} s)\n'.format(
@@ -184,49 +183,48 @@ def region_frame(snapshot, region_slices, region_positions, verbose):
         print('Transforming to region frames...')
         t0 = time.time()
 
+    region_coords = np.empty(np.shape(snapshot['coordinates']))
     if 'box_size' in snapshot:
-        region_coords = np.concatenate([
-            recenter_coordinates(
-                snapshot['coordinates'][start:end]-p, snapshot['box_size'])
-            for (start, end), p in zip(region_slices, region_positions)],
-            axis=0)
+        for sl, pos in zip(region_slices, region_positions):
+            region_coords[slice(*sl), :] = recenter_coordinates(
+                snapshot['coordinates'][slice(*sl)]-pos, snapshot['box_size'])
     else:
-        region_coords = np.concatenate([
-            snapshot['coordinates'][start:end]-p for (start, end), p in zip(
-                region_slices, region_positions)], axis=0)
+        for sl, pos in zip(region_slices, region_positions):
+            region_coords[slice(*sl), :] = snapshot['coordinates'][
+                slice(*sl)] - pos
 
     region_vels = np.empty(np.shape(snapshot['velocities']))
     region_bulk_vels = []
     if isinstance(snapshot['masses'], np.ndarray):
-        for start, end in region_slices:
+        for sl in region_slices:
             bulk_vel = np.sum(
-                snapshot['masses'][start:end][:, np.newaxis] *
-                snapshot['velocities'][start:end], axis=0) / \
-                       np.sum(snapshot['masses'][start:end])
-            region_vels[start:end, :] = snapshot['velocities'][start:end] - \
+                snapshot['masses'][slice(*sl)][:, np.newaxis] *
+                snapshot['velocities'][slice(*sl)], axis=0) / \
+                       np.sum(snapshot['masses'][slice(*sl)])
+            region_vels[slice(*sl), :] = snapshot['velocities'][slice(*sl)] - \
                 bulk_vel
             region_bulk_vels.append(bulk_vel)
     else:
-        for start, end in region_slices:
-            bulk_vel = np.mean(snapshot['velocities'][start:end], axis=0)
-            region_vels[start:end, :] = snapshot['velocities'][start:end] - \
+        for sl in region_slices:
+            bulk_vel = np.mean(snapshot['velocities'][slice(*sl)], axis=0)
+            region_vels[slice(*sl), :] = snapshot['velocities'][slice(*sl)] - \
                 bulk_vel
             region_bulk_vels.append(bulk_vel)
 
     rads = np.sqrt(np.einsum('...i,...i', region_coords, region_coords))
-    radial_vels = np.einsum('...i,...i', region_vels, region_coords) / rads
+    rhats = region_coords / rads[:, np.newaxis]
+    radial_vels = np.einsum('...i,...i', region_vels, rhats)
 
     if verbose:
         print('Transformed to region frames (took {} s)\n'.format(
             time.time() - t0))
 
-    return region_coords/rads[:, np.newaxis], radial_vels, \
-        np.array(region_bulk_vels)
+    return rhats, radial_vels, np.array(region_bulk_vels)
 
 
 def compare_radial_velocities(ids, ids_prev, radial_vels, radial_vels_prev,
-                              rhat, rhat_prev, region_offsets,
-                              region_offsets_prev, mode, verbose):
+                              rhat, rhat_prev, region_slices,
+                              region_slices_prev, mode, verbose):
 
     """
     Identify sign flips in the radial velocity between snapshots.
@@ -236,15 +234,12 @@ def compare_radial_velocities(ids, ids_prev, radial_vels, radial_vels_prev,
         print('Identifying {}ers...'.format(mode[:8]))
         t0 = time.time()
 
-    slices_prev = list(zip(region_offsets_prev[:-1], region_offsets_prev[1:]))
-    slices = list(zip(region_offsets[:-1], region_offsets[1:]))
-
     orbiting_ids = []
     entered_ids = []
     departed_ids = []
     matched_ids = []
     angles = []
-    for sl_prev, sl in zip(slices_prev, slices):
+    for sl_prev, sl in zip(region_slices_prev, region_slices):
         departed = np.setdiff1d(ids_prev[slice(*sl_prev)], ids[slice(*sl)])
         inds_departed = np.where(
             np.in1d(ids_prev[slice(*sl_prev)], departed))[0]
@@ -295,7 +290,7 @@ def calc_angles(matched_ids, angle_changes, matched_offsets, progen_exists,
                 ids_angle_prev, orbiting_ids, orbiting_offsets,
                 progen_exists_prev, angles_prev, angle_slices_prev,
                 orbiting_angle_ids_prev, orbiting_angles_prev,
-                orbiting_angle_slices_prev):
+                orbiting_angle_slices_prev, verbose):
 
     """
     Return the angles by which particles identified as going through pericenter
@@ -306,6 +301,10 @@ def calc_angles(matched_ids, angle_changes, matched_offsets, progen_exists,
     angle between pericenters, allowing these spurious detections to be removed
     by making a cut in the angle.
     """
+
+    if verbose:
+        print('Calculating angles...')
+        t0 = time.time()
 
     matched_slices = np.array(
         list(zip(matched_offsets[:-1], matched_offsets[1:])))
@@ -398,6 +397,10 @@ def calc_angles(matched_ids, angle_changes, matched_offsets, progen_exists,
     orbiting_angle_slices = np.array(
         list(zip(orbiting_angle_offsets[:-1],
                  orbiting_angle_offsets[1:])))
+
+    if verbose:
+        print('Finished calculating angles (took {} s)\n'.format(
+            time.time()-t0))
 
     return angles, matched_slices, orbiting_angle_ids, orbiting_angles, \
         orbiting_angle_slices, orbiting_angle_changes
