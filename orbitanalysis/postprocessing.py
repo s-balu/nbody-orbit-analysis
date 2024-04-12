@@ -2,7 +2,6 @@ import numpy as np
 import h5py
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
 
 from orbitanalysis.utils import myin1d, vector_norm, recenter_coordinates
 

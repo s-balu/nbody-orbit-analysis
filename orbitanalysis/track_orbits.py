@@ -56,7 +56,7 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
         data is saved in HDF5 format.
     mode : {'pericentric', 'apocentric'}, optional
         The orbit detection mode. 'pericentric' counts the number of
-        pericenters while 'apocentric' counts the number of aopcenters.
+        pericenters while 'apocentric' counts the number of apocenters.
     verbose : bool, optional
         Print status information and task durations during the orbit tracking.
 
@@ -113,7 +113,7 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
             progen_inds = myin1d(halo_exists, progen_exists)
             region_slices_desc = region_slices[progen_inds]
 
-            orbiting_ids, orbiting_offsets, entered_ids, entered_offsets, \
+            orbiting_ids, orbiting_inds, orbiting_offsets, entered_ids, entered_offsets, \
                 departed_ids, departed_offsets, matched_ids, matched_offsets, \
                 angle_changes = compare_radial_velocities(
                     snapshot['ids'], ids_prev, radial_vels, radial_vels_prev,
@@ -123,7 +123,7 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
             angles, matched_slices, orbiting_angle_ids, orbiting_angles, \
                 orbiting_angle_slices, orbiting_angle_changes = calc_angles(
                     matched_ids, angle_changes, matched_offsets, progen_exists,
-                    ids_angle_prev, orbiting_ids, orbiting_offsets,
+                    ids_angle_prev, orbiting_ids, orbiting_inds, orbiting_offsets,
                     progen_exists_prev, angles, angle_slices_prev,
                     orbiting_angle_ids, orbiting_angles, orbiting_angle_slices,
                     verbose)
@@ -235,6 +235,7 @@ def compare_radial_velocities(ids, ids_prev, radial_vels, radial_vels_prev,
         t0 = time.time()
 
     orbiting_ids = []
+    orbiting_inds = []
     entered_ids = []
     departed_ids = []
     matched_ids = []
@@ -242,14 +243,14 @@ def compare_radial_velocities(ids, ids_prev, radial_vels, radial_vels_prev,
     for sl_prev, sl in zip(region_slices_prev, region_slices):
         departed = np.setdiff1d(ids_prev[slice(*sl_prev)], ids[slice(*sl)])
         inds_departed = np.where(
-            np.in1d(ids_prev[slice(*sl_prev)], departed))[0]
+            np.in1d(ids_prev[slice(*sl_prev)], departed, kind='table'))[0]
         ids_prev_ = np.delete(ids_prev[slice(*sl_prev)], inds_departed)
         radial_vels_prev_ = np.delete(
             radial_vels_prev[slice(*sl_prev)], inds_departed)
         rhat_prev_ = np.delete(
             rhat_prev[slice(*sl_prev)], inds_departed, axis=0)
 
-        inds_match = myin1d(ids[slice(*sl)], ids_prev_)
+        inds_match = myin1d(ids[slice(*sl)], ids_prev_, kind='table')
         ids_match = ids[slice(*sl)][inds_match]
         radial_vels_match = radial_vels[slice(*sl)][inds_match]
         rhat_match = rhat[slice(*sl)][inds_match]
@@ -259,6 +260,7 @@ def compare_radial_velocities(ids, ids_prev, radial_vels, radial_vels_prev,
         elif mode == 'apocentric':
             cond = (radial_vels_prev_ > 0) & (radial_vels_match < 0)
         orbinds = np.argwhere(cond).flatten()
+        orbiting_inds.append(orbinds)
         orbids = ids_prev_[orbinds]
         orbiting_ids.append(orbids)
 
@@ -279,7 +281,8 @@ def compare_radial_velocities(ids, ids_prev, radial_vels, radial_vels_prev,
     departed_lens = [0] + [len(departed) for departed in departed_ids]
     matched_lens = [0] + [len(matched) for matched in matched_ids]
 
-    return np.concatenate(orbiting_ids), np.cumsum(orbiting_lens), \
+    return np.concatenate(orbiting_ids), np.concatenate(orbiting_inds),\
+        np.cumsum(orbiting_lens), \
         np.concatenate(entered_ids), np.cumsum(entered_lens), \
         np.concatenate(departed_ids), np.cumsum(departed_lens), \
         np.concatenate(matched_ids), np.cumsum(matched_lens), \
@@ -287,7 +290,7 @@ def compare_radial_velocities(ids, ids_prev, radial_vels, radial_vels_prev,
 
 
 def calc_angles(matched_ids, angle_changes, matched_offsets, progen_exists,
-                ids_angle_prev, orbiting_ids, orbiting_offsets,
+                ids_angle_prev, orbiting_ids, orbiting_inds, orbiting_offsets,
                 progen_exists_prev, angles_prev, angle_slices_prev,
                 orbiting_angle_ids_prev, orbiting_angles_prev,
                 orbiting_angle_slices_prev, verbose):
@@ -324,8 +327,7 @@ def calc_angles(matched_ids, angle_changes, matched_offsets, progen_exists,
         if p in progen_exists_prev:
             aslp = angle_slices_prev[j]
             intersect_inds = np.where(np.in1d(
-                ids_angle_halo, ids_angle_prev[slice(*aslp)],
-                kind='table'))[0]
+                ids_angle_halo, ids_angle_prev[slice(*aslp)], kind='table'))[0]
 
             inds_angle = myin1d(
                 ids_angle_prev[slice(*aslp)],
@@ -335,10 +337,7 @@ def calc_angles(matched_ids, angle_changes, matched_offsets, progen_exists,
 
         angles[slice(*asl)] = angles_halo
 
-        orb_angle_inds = myin1d(
-            ids_angle_halo, orbiting_ids[slice(*osl)],
-            kind='table')
-        orb_angles_halo = angles_halo[orb_angle_inds]
+        orb_angles_halo = angles_halo[orbiting_inds[slice(*osl)]]
         orb_angle_changes_halo = np.copy(orb_angles_halo)
 
         if p in progen_exists_prev:
@@ -358,8 +357,7 @@ def calc_angles(matched_ids, angle_changes, matched_offsets, progen_exists,
 
             inds_orb_angle = myin1d(
                 orbiting_angle_ids_prev_halo,
-                orbiting_ids[slice(*osl)][intersect_inds],
-                kind='table')
+                orbiting_ids[slice(*osl)][intersect_inds], kind='table')
 
             orbiting_angle_ids_halo = np.copy(
                 orbiting_angle_ids_prev_halo)
