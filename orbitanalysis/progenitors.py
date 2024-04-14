@@ -18,7 +18,7 @@ def get_central_particle_ids(snapshot, halo_positions, n=100):
         * region_offsets : (n_halos,) ndarray - the indices of the start of
                            each region block.
         * box_size : float or (3,) array_like - the simulation box side
-                     length(s).
+                     length(s) when using a periodic box (optional).
     halo_positions : (n_halos,) array_like
         The coordinates of the ceneters of the halos/central regions.
     n : int, optional
@@ -35,17 +35,24 @@ def get_central_particle_ids(snapshot, halo_positions, n=100):
 
     """
 
-    slices = list(
-        zip(snapshot['region_offsets'][:-1], snapshot['region_offsets'][1:]))
-    region_coords = np.concatenate([
-        recenter_coordinates(
-            snapshot['coordinates'][start:end]-p, snapshot['box_size'])
-        for (start, end), p in zip(slices, halo_positions)], axis=0)
+    offsets = list(snapshot['region_offsets']) + [len(snapshot['ids'])]
+    slices = list(zip(offsets[:-1], offsets[1:]))
+
+    region_coords = np.empty(np.shape(snapshot['coordinates']))
+    if 'box_size' in snapshot:
+        for sl, pos in zip(slices, halo_positions):
+            region_coords[slice(*sl), :] = recenter_coordinates(
+                snapshot['coordinates'][slice(*sl)]-pos, snapshot['box_size'])
+    else:
+        for sl, pos in zip(slices, halo_positions):
+            region_coords[slice(*sl), :] = snapshot['coordinates'][
+                slice(*sl)] - pos
 
     rads = np.sqrt(np.einsum('...i,...i', region_coords, region_coords))
     central_ids = [snapshot['ids'][np.argsort(rads[start:end])[:n]+start]
                    for start, end in slices]
     offsets = np.cumsum([0] + [len(ids) for ids in central_ids])[:-1]
+
     return np.hstack(central_ids), offsets
 
 
