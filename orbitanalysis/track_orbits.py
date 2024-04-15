@@ -243,14 +243,14 @@ def compare_radial_velocities(ids, ids_prev, radial_vels, radial_vels_prev,
     for sl_prev, sl in zip(region_slices_prev, region_slices):
         departed = np.setdiff1d(ids_prev[slice(*sl_prev)], ids[slice(*sl)])
         inds_departed = np.where(
-            np.in1d(ids_prev[slice(*sl_prev)], departed, kind='table'))[0]
+            np.in1d(ids_prev[slice(*sl_prev)], departed))[0]
         ids_prev_ = np.delete(ids_prev[slice(*sl_prev)], inds_departed)
         radial_vels_prev_ = np.delete(
             radial_vels_prev[slice(*sl_prev)], inds_departed)
         rhat_prev_ = np.delete(
             rhat_prev[slice(*sl_prev)], inds_departed, axis=0)
 
-        inds_match = myin1d(ids[slice(*sl)], ids_prev_, kind='table')
+        inds_match = myin1d(ids[slice(*sl)], ids_prev_)
         ids_match = ids[slice(*sl)][inds_match]
         radial_vels_match = radial_vels[slice(*sl)][inds_match]
         rhat_match = rhat[slice(*sl)][inds_match]
@@ -327,11 +327,11 @@ def calc_angles(matched_ids, angle_changes, matched_offsets, progen_exists,
         if p in progen_exists_prev:
             aslp = angle_slices_prev[j]
             intersect_inds = np.where(np.in1d(
-                ids_angle_halo, ids_angle_prev[slice(*aslp)], kind='table'))[0]
+                ids_angle_halo, ids_angle_prev[slice(*aslp)]))[0]
 
             inds_angle = myin1d(
                 ids_angle_prev[slice(*aslp)],
-                ids_angle_halo[intersect_inds], kind='table')
+                ids_angle_halo[intersect_inds])
             angles_halo[intersect_inds] += angles_prev[
                 slice(*aslp)][inds_angle]
 
@@ -351,13 +351,13 @@ def calc_angles(matched_ids, angle_changes, matched_offsets, progen_exists,
 
             intersect_bools = np.in1d(
                 orbiting_ids[slice(*osl)],
-                orbiting_angle_ids_prev_halo, kind='table')
+                orbiting_angle_ids_prev_halo)
             intersect_inds = np.where(intersect_bools)[0]
             nointersect_inds = np.where(~intersect_bools)[0]
 
             inds_orb_angle = myin1d(
                 orbiting_angle_ids_prev_halo,
-                orbiting_ids[slice(*osl)][intersect_inds], kind='table')
+                orbiting_ids[slice(*osl)][intersect_inds])
 
             orbiting_angle_ids_halo = np.copy(
                 orbiting_angle_ids_prev_halo)
