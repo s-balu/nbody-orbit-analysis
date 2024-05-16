@@ -62,9 +62,9 @@ class OrbitDecomposition:
 
         with h5py.File(self.filename, 'r') as datafile:
 
-            ids_orbiting = np.array([])
-            ids_infalling = np.array([])
-            ids_departed = np.array([])
+            ids_orbiting = np.array([], dtype=int)
+            ids_infalling = np.array([], dtype=int)
+            ids_departed = np.array([], dtype=int)
 
             for s in self.snapshot_numbers[:sind+1]:
 
