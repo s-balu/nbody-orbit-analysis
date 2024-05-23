@@ -21,8 +21,193 @@ class OrbitDecomposition:
             if 'box_size' in datafile.attrs:
                 self.box_size = datafile.attrs['box_size']
 
-    def get_halo_decomposition_at_snapshot(self, halo_id, snapshot_number,
-                                           snapshot_data, angle_cut=0.0):
+    def collate_orbits(self, halo_ids, snapshot_number, angle_cut=np.pi/2,
+                       savefile=None):
+
+        """
+        Collate the peri/apocenter information to obtain the complete set of
+        IDs for the orbiting and infalling particles, subject to an angle cut.
+        If a `savefile` is specified, the orbit information for each snapshot
+        will be saved on the fly.
+
+        Parameters
+        ----------
+        halo_ids : array_like
+            The IDs of the halos.
+        snapshot_number : int
+            The snapshot number at which to retrieve the halo decompoaition.
+        angle_cut : float, optional
+            Particles that advance about the halo center by less than this
+            angle between peri/apocenters will not have that peri/apocenter
+            counted. This is designed to remove spurious peri/apocenters from
+            orbits within subhalos.
+        savefile : str, optional
+            The HDF5 filename at which to save the orbit information.
+
+        """
+
+        sind = np.argwhere(
+            self.snapshot_numbers == snapshot_number).flatten()[0]
+
+        def correct_ids(oids, iids, dids):
+
+            orb_departed_ids = np.intersect1d(oids, dids)
+            orb_departed_inds = np.where(
+                np.in1d(oids, orb_departed_ids))[0]
+            oids = np.delete(oids, orb_departed_inds)
+            oids, c = np.unique(oids, return_counts=True)
+
+            iids = np.unique(iids)
+            inf_orb_ids = np.intersect1d(iids, oids)
+            inf_orb_inds = np.where(np.in1d(iids, inf_orb_ids))[0]
+            iids = np.delete(iids, inf_orb_inds)
+
+            inf_departed_ids = np.intersect1d(iids, dids)
+            inf_departed_inds = np.where(
+                np.in1d(iids, inf_departed_ids))[0]
+            iids = np.delete(iids, inf_departed_inds)
+
+            return oids, c, iids
+
+        ids_orbiting = np.array([], dtype=int)
+        ids_infalling = np.array([], dtype=int)
+        ids_departed = [np.array([], dtype=int) for _ in halo_ids]
+        inds_orbiting = [np.array([], dtype=int) for _ in halo_ids]
+        inds_infalling = [np.array([], dtype=int) for _ in halo_ids]
+
+        for s in self.snapshot_numbers[:sind+1]:
+
+            with h5py.File(self.filename, 'r') as datafile:
+
+                sdata = datafile['snapshot_{}'.format('%0.3d' % s)]
+                hinds1 = np.where(
+                    np.in1d(sdata['halo_ids_final'][:], halo_ids))[0]
+                if len(hinds1) == 0:
+                    continue
+                hids = sdata['halo_ids_final'][hinds1]
+                hinds2 = myin1d(halo_ids, hids)
+                hinds1 = hinds1[np.argsort(hinds2)]
+                hinds2 = np.sort(hinds2)
+
+                orbiting_lims = list(
+                    zip(sdata['orbiting_offsets'][hinds1],
+                        sdata['orbiting_offsets'][hinds1+1]))
+                orbids = np.concatenate(
+                    [sdata['orbiting_IDs'][slice(*lims)] for lims in
+                     orbiting_lims])
+                angles = np.concatenate(
+                    [sdata['angles'][slice(*lims)] for lims in orbiting_lims])
+
+                new_orb_lens = [0] + [
+                    np.diff(lims)[0] for lims in orbiting_lims]
+                new_orb_offsets = np.cumsum(new_orb_lens)
+                new_orb_lims = list(
+                    zip(new_orb_offsets[:-1], new_orb_offsets[1:]))
+
+                angle_bool = np.zeros(len(angles), dtype=bool)
+                angle_inds = np.argwhere(angles > angle_cut).flatten()
+                angle_bool[angle_inds] = True
+                angle_cut_lens = [0] + [
+                    np.sum(angle_bool[slice(*lims)]) for lims in new_orb_lims]
+                angle_cut_offsets = np.cumsum(angle_cut_lens)
+                angle_cut_lims = np.array(list(
+                    zip(angle_cut_offsets[:-1], angle_cut_offsets[1:])))
+                N = len(ids_orbiting)
+                for hind, lim in zip(hinds2, angle_cut_lims):
+                    inds_orbiting[hind] = np.append(
+                        inds_orbiting[hind], np.arange(*(lim+N)))
+                ids_orbiting = np.append(ids_orbiting, orbids[angle_inds])
+
+                infalling_lims = list(
+                    zip(sdata['infalling_offsets'][hinds1],
+                        sdata['infalling_offsets'][hinds1+1]))
+                infids = np.concatenate(
+                    [sdata['infalling_IDs'][slice(*lims)] for lims in
+                     infalling_lims])
+
+                new_inf_lens = [0] + [
+                    np.diff(lims)[0] for lims in infalling_lims]
+                new_inf_offsets = np.cumsum(new_inf_lens)
+                new_inf_lims = np.array(list(
+                    zip(new_inf_offsets[:-1], new_inf_offsets[1:])))
+                N = len(ids_infalling)
+                for hind, lim in zip(hinds2, new_inf_lims):
+                    inds_infalling[hind] = np.append(
+                        inds_infalling[hind], np.arange(*(lim+N)))
+                ids_infalling = np.append(ids_infalling, infids)
+
+                for hind1, hind2, ilims in zip(hinds1, hinds2, new_inf_lims):
+                    ids_returned = np.intersect1d(
+                        ids_departed[hind2], infids[slice(*ilims)])
+                    if len(ids_returned) > 0:
+                        inds_returned = np.where(
+                            np.in1d(ids_departed[hind2], ids_returned))[0]
+                        ids_departed[hind2] = np.delete(
+                            ids_departed[hind2], inds_returned)
+
+                    departed_lims = sdata['departed_offsets'][hind1:hind1+2]
+                    ids_departed[hind2] = np.append(
+                        ids_departed[hind2], sdata['departed_IDs'][
+                            slice(*departed_lims)])
+
+            if savefile is not None:
+
+                ids_orbiting_, counts, ids_infalling_ = [], [], []
+                for oinds, iinds, hind in zip(
+                        inds_orbiting, inds_infalling, hinds2):
+                    oids_, c_, iids_ = correct_ids(
+                        ids_orbiting[oinds], ids_infalling[iinds],
+                        ids_departed[hind])
+                    ids_orbiting_.append(oids_)
+                    counts.append(c_)
+                    ids_infalling_.append(iids_)
+                orbiting_offsets = np.cumsum(
+                    [0] + [len(ids) for ids in ids_orbiting_])
+                infalling_offsets = np.cumsum(
+                    [0] + [len(ids) for ids in ids_infalling_])
+                with h5py.File(savefile, 'a') as hf:
+                    hfsnap = hf.create_group('snapshot_{}'.format('%03d' % s))
+                    hfsnap.create_dataset(
+                        'orbiting_IDs', data=np.concatenate(ids_orbiting_))
+                    hfsnap.create_dataset(
+                        'infalling_IDs', data=np.concatenate(ids_infalling_))
+                    hfsnap.create_dataset(
+                        'orbit_counts', data=np.concatenate(counts))
+                    hfsnap.create_dataset(
+                        'orbiting_offsets', data=orbiting_offsets)
+                    hfsnap.create_dataset(
+                        'infalling_offsets', data=infalling_offsets)
+
+        if savefile is None:
+
+            ids_orbiting_, counts, ids_infalling_ = [], [], []
+            for oinds, iinds, hind in zip(
+                    inds_orbiting, inds_infalling, hinds2):
+                oids_, c_, iids_ = correct_ids(
+                    ids_orbiting[oinds], ids_infalling[iinds],
+                    ids_departed[hind])
+                ids_orbiting_.append(oids_)
+                counts.append(c_)
+                ids_infalling_.append(iids_)
+        else:
+            with h5py.File(savefile, 'a') as hf:
+                hf.create_dataset('halo_IDs', data=halo_ids)
+
+        self.orbiting_offsets = np.cumsum(
+            [0] + [len(ids) for ids in ids_orbiting_])
+        self.infalling_offsets = np.cumsum(
+            [0] + [len(ids) for ids in ids_infalling_])
+        self.ids_orbiting = np.concatenate(ids_orbiting_)
+        self.ids_infalling = np.concatenate(ids_infalling_)
+        self.counts = np.concatenate(counts)
+        self.halo_ids_collated = halo_ids
+        self.snapshot_number_collated = snapshot_number
+
+        return
+
+    def get_particle_data_at_snapshot(self, snapshot_data, halo_ids=None,
+                                      snapshot_number=None, angle_cut=0.0,
+                                      readfile=None):
 
         """
         Get the orbiting and infalling components of a halo at a particular
@@ -30,10 +215,6 @@ class OrbitDecomposition:
 
         Parameters
         ----------
-        halo_id : int
-            The ID of the halo.
-        snapshot_number : int
-            The snapshot number at which to retrieve the halo decompoaition.
         snapshot_data : dict
             A dictionary with the following elements:
 
@@ -44,114 +225,129 @@ class OrbitDecomposition:
             * velocities : (N, 3) ndarray - the corresponding velocities.
             * masses : (N,) ndarray or float - the corresponding masses, or a
                        single mass value if all particles have the same mass.
+        halo_ids : array_like, optional if `collate_orbits` has been run or if
+                   reading from a file.
+            The IDs of the halos.
+        snapshot_number : int, optional if `collate_orbits` has been run
+            The snapshot number at which to retrieve the halo decomposition.
         angle_cut : float, optional
             Particles that advance about the halo center by less than this
             angle between peri/apocenters will not have that peri/apocenter
             counted. This is designed to remove spurious peri/apocenters from
             orbits within subhalos.
+        readfile : str, optional
+            Read the orbit information from a file generated by
+            `collate_orbits`.
 
         """
 
-        hind = np.argwhere(self.main_branches[-1] == halo_id).flatten()[0]
+        if not hasattr(self, "ids_orbiting") and readfile is None:
+            self.collate_orbits(halo_ids, snapshot_number, angle_cut)
+        elif readfile is not None:
+            with h5py.File(readfile, 'r') as hf:
+                hfsnap = hf['snapshot_{}'.format('%03d' % snapshot_number)]
+                self.ids_orbiting = hfsnap['orbiting_IDs'][:]
+                self.ids_infalling = hfsnap['infalling_IDs'][:]
+                self.counts = hfsnap['orbit_counts'][:]
+                self.orbiting_offsets = hfsnap['orbiting_offsets'][:]
+                self.infalling_offsets = hfsnap['infalling_offsets'][:]
+                self.halo_ids_collated = hf['halo_IDs'][:]
+                self.snapshot_number_collated = snapshot_number
+        orbiting_lims = list(
+            zip(self.orbiting_offsets[:-1], self.orbiting_offsets[1:]))
+        infalling_lims = list(
+            zip(self.infalling_offsets[:-1], self.infalling_offsets[1:]))
+
+        hinds = myin1d(self.main_branches[-1], self.halo_ids_collated)
         sind = np.argwhere(
-            self.snapshot_numbers == snapshot_number).flatten()[0]
+            self.snapshot_numbers == self.snapshot_number_collated).flatten()[
+            0]
 
-        self.region_position = self.region_positions[sind, hind]
-        self.region_radius = self.region_radii[sind, hind]
-        self.bulk_velocity = self.bulk_velocities[sind, hind]
+        region_positions = self.region_positions[sind, hinds]
+        bulk_velocities = self.bulk_velocities[sind, hinds]
 
-        with h5py.File(self.filename, 'r') as datafile:
-
-            ids_orbiting = np.array([], dtype=int)
-            ids_infalling = np.array([], dtype=int)
-            ids_departed = np.array([], dtype=int)
-
-            for s in self.snapshot_numbers[:sind+1]:
-
-                sdata = datafile['snapshot_{}'.format('%0.3d' % s)]
-
-                hind_ = np.argwhere(
-                    sdata['halo_ids_final'] == halo_id).flatten()
-                if len(hind_) == 0:
-                    continue
-                else:
-                    hind_ = hind_[0]
-
-                orbiting_lims = sdata['orbiting_offsets'][hind_:hind_+2]
-                orbids = sdata['orbiting_IDs'][slice(*orbiting_lims)]
-                angles = sdata['angles'][slice(*orbiting_lims)]
-                ids_orbiting = np.append(
-                    ids_orbiting, orbids[
-                        np.argwhere(angles > angle_cut).flatten()])
-
-                infalling_lims = sdata['infalling_offsets'][hind_:hind_+2]
-                infids = sdata['infalling_IDs'][slice(*infalling_lims)]
-                ids_infalling = np.append(ids_infalling, infids)
-
-                ids_returned = np.intersect1d(ids_departed, infids)
-                if len(ids_returned) > 0:
-                    inds_returned = np.where(
-                        np.in1d(ids_departed, ids_returned))[0]
-                    ids_departed = np.delete(ids_departed, inds_returned)
-
-                departed_lims = sdata['departed_offsets'][hind_:hind_+2]
-                ids_departed = np.append(
-                    ids_departed, sdata['departed_IDs'][slice(*departed_lims)])
-
-        orb_departed_ids = np.intersect1d(ids_orbiting, ids_departed)
-        orb_departed_inds = np.where(
-            np.in1d(ids_orbiting, orb_departed_ids))[0]
-        ids_orbiting = np.delete(ids_orbiting, orb_departed_inds)
-        ids_orbiting, counts = np.unique(ids_orbiting, return_counts=True)
-
-        ids_infalling = np.unique(ids_infalling)
-        inf_orb_ids = np.intersect1d(ids_infalling, ids_orbiting)
-        inf_orb_inds = np.where(np.in1d(ids_infalling, inf_orb_ids))[0]
-        ids_infalling = np.delete(ids_infalling, inf_orb_inds)
-
-        inf_departed_ids = np.intersect1d(ids_infalling, ids_departed)
-        inf_departed_inds = np.where(
-            np.in1d(ids_infalling, inf_departed_ids))[0]
-        ids_infalling = np.delete(ids_infalling, inf_departed_inds)
-
-        self.ids_orbiting = np.intersect1d(snapshot_data['ids'], ids_orbiting)
-        inds_contained = myin1d(ids_orbiting, self.ids_orbiting)
-        self.counts = counts[inds_contained]
-
-        self.ids_infalling = np.intersect1d(
-            snapshot_data['ids'], ids_infalling)
-
-        inds_orbiting = myin1d(snapshot_data['ids'], self.ids_orbiting)
-        if hasattr(self, "box_size"):
-            self.coords_orbiting = recenter_coordinates(
-                snapshot_data['coordinates'][inds_orbiting] -
-                self.region_position, self.box_size)
-        else:
-            self.coords_orbiting = snapshot_data['coordinates'][
-                inds_orbiting] - self.region_position
-        self.vels_orbiting = snapshot_data['velocities'][inds_orbiting] - \
-            self.bulk_velocity
+        n_orb, n_inf = len(self.ids_orbiting), len(self.ids_infalling)
+        ids_orbiting = np.empty(n_orb)
+        ids_infalling = np.empty(n_inf)
+        coords_orbiting = np.empty((n_orb, 3))
+        coords_infalling = np.empty((n_inf, 3))
+        vels_orbiting = np.empty((n_orb, 3))
+        vels_infalling = np.empty((n_inf, 3))
         if isinstance(snapshot_data['masses'], np.ndarray):
-            self.masses_orbiting = snapshot_data['masses'][inds_orbiting]
+            masses_orbiting = np.empty(n_orb)
+            masses_infalling = np.empty(n_inf)
+            mass_is_array = True
         else:
-            self.masses_orbiting = snapshot_data['masses']
+            mass_is_array = False
+        counts = np.empty(n_orb)
+        ooff, ioff = 0, 0
+        self.orbiting_slices, self.infalling_slices = [], []
+        for olim, ilim, region_position, bulk_velocity in zip(
+                orbiting_lims, infalling_lims, region_positions,
+                bulk_velocities):
+            olen, ilen = np.diff(olim)[0], np.diff(ilim)[0]
+            osl, isl = slice(*olim), slice(*ilim)
+            osl_, isl_ = slice(ooff, ooff+olen), slice(ioff, ioff+ilen)
+            self.orbiting_slices.append(osl_)
+            self.infalling_slices.append(isl_)
+            orbids = np.intersect1d(
+                snapshot_data['ids'], self.ids_orbiting[osl])
+            inds_contained = myin1d(self.ids_orbiting[osl], orbids)
+            ids_orbiting[osl_] = orbids
+            counts[osl_] = self.counts[osl][inds_contained]
 
-        inds_infalling = myin1d(snapshot_data['ids'], self.ids_infalling)
-        if hasattr(self, "box_size"):
-            self.coords_infalling = recenter_coordinates(
-                snapshot_data['coordinates'][inds_infalling] -
-                self.region_position, self.box_size)
-        else:
-            self.coords_infalling = snapshot_data['coordinates'][
-                inds_infalling] - self.region_position
-        self.vels_infalling = snapshot_data['velocities'][inds_infalling] - \
-            self.bulk_velocity
-        if isinstance(snapshot_data['masses'], np.ndarray):
-            self.masses_infalling = snapshot_data['masses'][inds_infalling]
-        else:
-            self.masses_infalling = snapshot_data['masses']
+            infids = np.intersect1d(
+                snapshot_data['ids'], self.ids_infalling[isl])
+            ids_infalling[isl_] = infids
 
-    def plot_position_space(self, projection='xy', colormap='rainbow_r',
+            inds_orbiting = myin1d(snapshot_data['ids'], orbids)
+            if hasattr(self, "box_size"):
+                coords_orbiting[osl_] = recenter_coordinates(
+                    snapshot_data['coordinates'][inds_orbiting] -
+                    region_position, self.box_size)
+            else:
+                coords_orbiting[osl_] = snapshot_data['coordinates'][
+                    inds_orbiting] - region_position
+            vels_orbiting[osl_] = snapshot_data['velocities'][inds_orbiting] -\
+                bulk_velocity
+            if mass_is_array:
+                masses_orbiting[osl_] = snapshot_data['masses'][inds_orbiting]
+            else:
+                masses_orbiting = snapshot_data['masses']
+
+            inds_infalling = myin1d(snapshot_data['ids'], infids)
+            if hasattr(self, "box_size"):
+                coords_infalling[isl_] = recenter_coordinates(
+                    snapshot_data['coordinates'][inds_infalling] -
+                    region_position, self.box_size)
+            else:
+                coords_infalling[isl_] = snapshot_data['coordinates'][
+                    inds_infalling] - region_position
+            vels_infalling[isl_] = snapshot_data['velocities'][inds_infalling]\
+                - bulk_velocity
+            if mass_is_array:
+                masses_infalling[isl_] = snapshot_data['masses'][
+                    inds_infalling]
+            else:
+                masses_infalling = snapshot_data['masses']
+
+            ooff += olen
+            ioff += ilen
+
+        self.ids_orbiting = ids_orbiting[:ooff]
+        self.ids_infalling = ids_infalling[:ioff]
+        self.coords_orbiting = coords_orbiting[:ooff]
+        self.coords_infalling = coords_infalling[:ioff]
+        self.vels_orbiting = vels_orbiting[:ooff]
+        self.vels_infalling = vels_infalling[:ioff]
+        if mass_is_array:
+            self.masses_orbiting = masses_orbiting[:ooff]
+            self.masses_infalling = masses_infalling[:ioff]
+        self.counts = counts[:ooff]
+
+        return
+
+    def plot_position_space(self, halo_id, projection='xy', colormap='rainbow_r',
                             counts_to_plot='all', xlabel=r'$x/R_{\rm region}$',
                             ylabel=r'$y/R_{\rm region}$', display=False,
                             savefile=None):
@@ -160,6 +356,23 @@ class OrbitDecomposition:
         Plot the spatial distribution of the particles, colored by number of
         orbits.
         """
+
+        ind = np.argwhere(self.halo_ids_collated == halo_id).flatten()
+        if len(ind) == 0:
+            raise ValueError('The halo corresponding to the provided ID has '
+                             'not been post-processed!')
+        else:
+            ind = ind[0]
+        osl, isl = self.orbiting_slices[ind], self.infalling_slices[ind]
+        coords_orbiting = self.coords_orbiting[osl]
+        counts = self.counts[osl]
+        coords_infalling = self.coords_infalling[isl]
+
+        hind = np.argwhere(self.main_branches[-1] == halo_id).flatten()[0]
+        sind = np.argwhere(
+            self.snapshot_numbers == self.snapshot_number_collated).flatten()[
+            0]
+        region_radius = self.region_radii[sind, hind]
 
         if counts_to_plot == 'all':
             counts_to_plot = np.unique(self.counts)
@@ -193,18 +406,18 @@ class OrbitDecomposition:
 
         # orbiting & infalling
         for ii in [0, 2]:
-            axs[ii].scatter(self.coords_infalling[:, proj[0]] /
-                            self.region_radius,
-                            self.coords_infalling[:, proj[1]] /
-                            self.region_radius,
+            axs[ii].scatter(coords_infalling[:, proj[0]] /
+                            region_radius,
+                            coords_infalling[:, proj[1]] /
+                            region_radius,
                             color='grey', alpha=0.4, marker='.', s=0.2)
         for ii in [0, 1]:
             for n in counts_to_plot[counts_to_plot > 0]:
-                norb = np.where(self.counts == n)[0]
-                axs[ii].scatter(self.coords_orbiting[norb][:, proj[0]] /
-                                self.region_radius,
-                                self.coords_orbiting[norb][:, proj[1]] /
-                                self.region_radius,
+                norb = np.where(counts == n)[0]
+                axs[ii].scatter(coords_orbiting[norb][:, proj[0]] /
+                                region_radius,
+                                coords_orbiting[norb][:, proj[1]] /
+                                region_radius,
                                 color=clrmap(norm(n)), alpha=0.4, marker='.',
                                 s=0.2)
 
