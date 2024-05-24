@@ -241,6 +241,9 @@ class OrbitDecomposition:
 
         """
 
+        if halo_ids is not None:
+            halo_ids = np.atleast_1d(halo_ids)
+
         if not hasattr(self, "ids_orbiting") and readfile is None:
             self.collate_orbits(halo_ids, snapshot_number, angle_cut)
         elif readfile is not None:
@@ -253,18 +256,23 @@ class OrbitDecomposition:
                 self.infalling_offsets = hfsnap['infalling_offsets'][:]
                 self.halo_ids_collated = hf['halo_IDs'][:]
                 self.snapshot_number_collated = snapshot_number
-        orbiting_lims = list(
-            zip(self.orbiting_offsets[:-1], self.orbiting_offsets[1:]))
-        infalling_lims = list(
-            zip(self.infalling_offsets[:-1], self.infalling_offsets[1:]))
+        orbiting_lims = np.array(list(
+            zip(self.orbiting_offsets[:-1], self.orbiting_offsets[1:])))
+        infalling_lims = np.array(list(
+            zip(self.infalling_offsets[:-1], self.infalling_offsets[1:])))
 
-        hinds = myin1d(self.main_branches[-1], self.halo_ids_collated)
+        if halo_ids is not None:
+            hinds1 = myin1d(self.halo_ids_collated, halo_ids)
+            orbiting_lims = orbiting_lims[hinds1]
+            infalling_lims = infalling_lims[hinds1]
+            hinds2 = myin1d(self.main_branches[-1], halo_ids)
+        else:
+            hinds2 = myin1d(self.main_branches[-1], self.halo_ids_collated)
         sind = np.argwhere(
             self.snapshot_numbers == self.snapshot_number_collated).flatten()[
             0]
-
-        region_positions = self.region_positions[sind, hinds]
-        bulk_velocities = self.bulk_velocities[sind, hinds]
+        region_positions = self.region_positions[sind, hinds2]
+        bulk_velocities = self.bulk_velocities[sind, hinds2]
 
         n_orb, n_inf = len(self.ids_orbiting), len(self.ids_infalling)
         ids_orbiting = np.empty(n_orb)
@@ -344,11 +352,14 @@ class OrbitDecomposition:
             self.masses_orbiting = masses_orbiting[:ooff]
             self.masses_infalling = masses_infalling[:ioff]
         self.counts = counts[:ooff]
+        self.halo_ids_partdata = halo_ids if halo_ids is not None else \
+            self.halo_ids_collated
 
         return
 
-    def plot_position_space(self, halo_id, projection='xy', colormap='rainbow_r',
-                            counts_to_plot='all', xlabel=r'$x/R_{\rm region}$',
+    def plot_position_space(self, halo_id, projection='xy',
+                            colormap='rainbow_r', counts_to_plot='all',
+                            xlabel=r'$x/R_{\rm region}$',
                             ylabel=r'$y/R_{\rm region}$', display=False,
                             savefile=None):
 
@@ -357,7 +368,7 @@ class OrbitDecomposition:
         orbits.
         """
 
-        ind = np.argwhere(self.halo_ids_collated == halo_id).flatten()
+        ind = np.argwhere(self.halo_ids_partdata == halo_id).flatten()
         if len(ind) == 0:
             raise ValueError('The halo corresponding to the provided ID has '
                              'not been post-processed!')
@@ -442,7 +453,8 @@ class OrbitDecomposition:
         else:
             plt.close(fig)
 
-    def plot_phase_space(self, colormap='rainbow_r', counts_to_plot='all',
+    def plot_phase_space(self, halo_id, colormap='rainbow_r',
+                         counts_to_plot='all',
                          radius_label=r'$r/R_{\rm region}$',
                          radial_velocity_label=r'$v_r\,\,({\rm km\, s}^{-1})$',
                          logr=True, display=False, savefile=None):
@@ -452,15 +464,34 @@ class OrbitDecomposition:
         of orbits.
         """
 
-        r_orb = vector_norm(self.coords_orbiting)
+        ind = np.argwhere(self.halo_ids_partdata == halo_id).flatten()
+        if len(ind) == 0:
+            raise ValueError('The halo corresponding to the provided ID has '
+                             'not been post-processed!')
+        else:
+            ind = ind[0]
+        osl, isl = self.orbiting_slices[ind], self.infalling_slices[ind]
+        coords_orbiting = self.coords_orbiting[osl]
+        vels_orbiting = self.vels_orbiting[osl]
+        counts = self.counts[osl]
+        coords_infalling = self.coords_infalling[isl]
+        vels_infalling = self.vels_infalling[isl]
+
+        hind = np.argwhere(self.main_branches[-1] == halo_id).flatten()[0]
+        sind = np.argwhere(
+            self.snapshot_numbers == self.snapshot_number_collated).flatten()[
+            0]
+        region_radius = self.region_radii[sind, hind]
+
+        r_orb = vector_norm(coords_orbiting)
         vr_orb = np.einsum(
-            '...i,...i', self.vels_orbiting, self.coords_orbiting) / r_orb
-        r_inf = vector_norm(self.coords_infalling)
+            '...i,...i', vels_orbiting, coords_orbiting) / r_orb
+        r_inf = vector_norm(coords_infalling)
         vr_inf = np.einsum(
-            '...i,...i', self.vels_infalling, self.coords_infalling) / r_inf
+            '...i,...i', vels_infalling, coords_infalling) / r_inf
 
         if counts_to_plot == 'all':
-            counts_to_plot = np.unique(self.counts)
+            counts_to_plot = np.unique(counts)
 
         clrmap = mpl.colormaps[colormap]
 
@@ -481,12 +512,12 @@ class OrbitDecomposition:
 
         # orbiting & infalling
         for ii in [0, 2]:
-            axs[ii].scatter(r_inf/self.region_radius, vr_inf, color='grey',
+            axs[ii].scatter(r_inf/region_radius, vr_inf, color='grey',
                             alpha=0.4, marker='.', s=0.2)
         for ii in [0, 1]:
             for n in counts_to_plot[counts_to_plot > 0]:
-                norb = np.where(self.counts == n)[0]
-                axs[ii].scatter(r_orb[norb]/self.region_radius, vr_orb[norb],
+                norb = np.where(counts == n)[0]
+                axs[ii].scatter(r_orb[norb]/region_radius, vr_orb[norb],
                                 color=clrmap(norm(n)), alpha=0.4, marker='.',
                                 s=0.2)
 
