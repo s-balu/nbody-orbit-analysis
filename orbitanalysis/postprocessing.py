@@ -153,11 +153,10 @@ class OrbitDecomposition:
             if savefile is not None:
 
                 ids_orbiting_, counts, ids_infalling_ = [], [], []
-                for oinds, iinds, hind in zip(
-                        inds_orbiting, inds_infalling, hinds2):
+                for oinds, iinds, dids in zip(
+                        inds_orbiting, inds_infalling, ids_departed):
                     oids_, c_, iids_ = correct_ids(
-                        ids_orbiting[oinds], ids_infalling[iinds],
-                        ids_departed[hind])
+                        ids_orbiting[oinds], ids_infalling[iinds], dids)
                     ids_orbiting_.append(oids_)
                     counts.append(c_)
                     ids_infalling_.append(iids_)
@@ -181,11 +180,10 @@ class OrbitDecomposition:
         if savefile is None:
 
             ids_orbiting_, counts, ids_infalling_ = [], [], []
-            for oinds, iinds, hind in zip(
-                    inds_orbiting, inds_infalling, hinds2):
+            for oinds, iinds, dids in zip(
+                    inds_orbiting, inds_infalling, ids_departed):
                 oids_, c_, iids_ = correct_ids(
-                    ids_orbiting[oinds], ids_infalling[iinds],
-                    ids_departed[hind])
+                    ids_orbiting[oinds], ids_infalling[iinds], dids)
                 ids_orbiting_.append(oids_)
                 counts.append(c_)
                 ids_infalling_.append(iids_)
@@ -293,19 +291,21 @@ class OrbitDecomposition:
         for olim, ilim, region_position, bulk_velocity in zip(
                 orbiting_lims, infalling_lims, region_positions,
                 bulk_velocities):
-            olen, ilen = np.diff(olim)[0], np.diff(ilim)[0]
             osl, isl = slice(*olim), slice(*ilim)
-            osl_, isl_ = slice(ooff, ooff+olen), slice(ioff, ioff+ilen)
-            self.orbiting_slices.append(osl_)
-            self.infalling_slices.append(isl_)
             orbids = np.intersect1d(
                 snapshot_data['ids'], self.ids_orbiting[osl])
             inds_contained = myin1d(self.ids_orbiting[osl], orbids)
+            olen_ = len(orbids)
+            osl_ = slice(ooff, ooff+olen_)
+            self.orbiting_slices.append(osl_)
             ids_orbiting[osl_] = orbids
             counts[osl_] = self.counts[osl][inds_contained]
 
             infids = np.intersect1d(
                 snapshot_data['ids'], self.ids_infalling[isl])
+            ilen_ = len(infids)
+            isl_ = slice(ioff, ioff+ilen_)
+            self.infalling_slices.append(isl_)
             ids_infalling[isl_] = infids
 
             inds_orbiting = myin1d(snapshot_data['ids'], orbids)
@@ -339,8 +339,8 @@ class OrbitDecomposition:
             else:
                 masses_infalling = snapshot_data['masses']
 
-            ooff += olen
-            ioff += ilen
+            ooff += olen_
+            ioff += ilen_
 
         self.ids_orbiting = ids_orbiting[:ooff]
         self.ids_infalling = ids_infalling[:ioff]
