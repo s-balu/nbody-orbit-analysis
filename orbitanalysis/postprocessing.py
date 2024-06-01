@@ -33,7 +33,7 @@ class OrbitDecomposition:
         Parameters
         ----------
         halo_ids : array_like
-            The IDs of the halos.
+            The IDs of the halos at redshift 0.
         snapshot_number : int
             The snapshot number at which to retrieve the halo decompoaition.
         angle_cut : float, optional
@@ -45,6 +45,17 @@ class OrbitDecomposition:
             The HDF5 filename at which to save the orbit information.
 
         """
+
+        halo_ids = np.unique(halo_ids)
+        halo_ids_ = np.intersect1d(self.main_branches[-1], halo_ids)
+        if len(halo_ids_) < len(halo_ids):
+            self.missing_halo_ids = np.setdiff1d(
+                halo_ids, self.main_branches[-1])
+            raise ValueError(
+                "The input halo ID list contains IDs of halos (at z=0) that "
+                "have not been processed. Refer to the final row of the "
+                "`main_branches` attribute to see all IDs (at z=0) that have "
+                "been processed.")
 
         sind = np.argwhere(
             self.snapshot_numbers == snapshot_number).flatten()[0]
@@ -87,6 +98,7 @@ class OrbitDecomposition:
                 hids = sdata['halo_ids_final'][hinds1]
                 hinds2 = myin1d(halo_ids, hids)
                 hinds1 = hinds1[np.argsort(hinds2)]
+                hids = hids[np.argsort(hinds2)]
                 hinds2 = np.sort(hinds2)
 
                 orbiting_lims = list(
@@ -176,6 +188,7 @@ class OrbitDecomposition:
                         'orbiting_offsets', data=orbiting_offsets)
                     hfsnap.create_dataset(
                         'infalling_offsets', data=infalling_offsets)
+                    hfsnap.create_dataset('halo_IDs_final', data=hids)
 
         if savefile is None:
 
@@ -241,6 +254,18 @@ class OrbitDecomposition:
 
         if halo_ids is not None:
             halo_ids = np.atleast_1d(halo_ids)
+        if hasattr(snapshot_data['masses'], "__len__"):
+            mass_is_array = True
+        else:
+            mass_is_array = False
+
+        snapshot_data['ids'], inds = np.unique(
+            snapshot_data['ids'], return_index=True)
+        if len(inds) != len(snapshot_data['coordinates']):
+            snapshot_data['coordinates'] = snapshot_data['coordinates'][inds]
+            snapshot_data['velocities'] = snapshot_data['velocities'][inds]
+            if mass_is_array:
+                snapshot_data['masses'] = snapshot_data['masses'][inds]
 
         if not hasattr(self, "ids_orbiting") and readfile is None:
             self.collate_orbits(halo_ids, snapshot_number, angle_cut)
@@ -260,98 +285,143 @@ class OrbitDecomposition:
             zip(self.infalling_offsets[:-1], self.infalling_offsets[1:])))
 
         if halo_ids is not None:
-            hinds1 = myin1d(self.halo_ids_collated, halo_ids)
-            orbiting_lims = orbiting_lims[hinds1]
-            infalling_lims = infalling_lims[hinds1]
+            try:
+                hinds1 = myin1d(self.halo_ids_collated, halo_ids)
+                if len(halo_ids) == len(self.halo_ids_collated):
+                    if np.all(halo_ids == self.halo_ids_collated):
+                        rearrange_halos = False
+                    else:
+                        rearrange_halos = True
+                else:
+                    rearrange_halos = True
+            except IndexError:
+                raise ValueError(
+                    "The input halo ID list contains IDs of halos (at z=0) "
+                    "that have not been collated.")
             hinds2 = myin1d(self.main_branches[-1], halo_ids)
         else:
             hinds2 = myin1d(self.main_branches[-1], self.halo_ids_collated)
         sind = np.argwhere(
-            self.snapshot_numbers == self.snapshot_number_collated).flatten()[
-            0]
+            self.snapshot_numbers == self.snapshot_number_collated
+                ).flatten()[0]
         region_positions = self.region_positions[sind, hinds2]
         bulk_velocities = self.bulk_velocities[sind, hinds2]
 
-        n_orb, n_inf = len(self.ids_orbiting), len(self.ids_infalling)
-        ids_orbiting = np.empty(n_orb)
-        ids_infalling = np.empty(n_inf)
-        coords_orbiting = np.empty((n_orb, 3))
-        coords_infalling = np.empty((n_inf, 3))
-        vels_orbiting = np.empty((n_orb, 3))
-        vels_infalling = np.empty((n_inf, 3))
-        if isinstance(snapshot_data['masses'], np.ndarray):
-            masses_orbiting = np.empty(n_orb)
-            masses_infalling = np.empty(n_inf)
-            mass_is_array = True
+        if halo_ids is not None:
+            if rearrange_halos:
+                selected_orb_offsets = np.cumsum(
+                    [0] + list(np.diff(orbiting_lims[hinds1], axis=1).flatten()))
+                selected_orb_lims = np.array(list(
+                    zip(selected_orb_offsets[:-1], selected_orb_offsets[1:])))
+                selected_inf_offsets = np.cumsum(
+                    [0] + list(np.diff(infalling_lims[hinds1], axis=1).flatten()))
+                selected_inf_lims = np.array(list(
+                    zip(selected_inf_offsets[:-1], selected_inf_offsets[1:])))
+                self.ids_orbiting_collated = self.ids_orbiting
+                self.ids_orbiting = np.empty(selected_orb_offsets[-1], dtype=int)
+                self.counts_collated = self.counts
+                self.counts = np.empty(selected_orb_offsets[-1], dtype=int)
+                for lims, new_lims in zip(
+                        orbiting_lims[hinds1], selected_orb_lims):
+                    self.ids_orbiting[slice(*new_lims)] = \
+                        self.ids_orbiting_collated[slice(*lims)]
+                    self.counts[slice(*new_lims)] = \
+                        self.counts_collated[slice(*lims)]
+                self.ids_infalling_collated = self.ids_infalling
+                self.ids_infalling = np.empty(selected_inf_offsets[-1], dtype=int)
+                for lims, new_lims in zip(
+                        infalling_lims[hinds1], selected_inf_lims):
+                    self.ids_infalling[slice(*new_lims)] = \
+                        self.ids_infalling_collated[slice(*lims)]
+                self.orbiting_offsets_collated = self.orbiting_offsets
+                self.orbiting_offsets = selected_orb_offsets
+                self.infalling_offsets_collated = self.infalling_offsets
+                self.infalling_offsets = selected_inf_offsets
+
+                orbiting_lims = np.array(list(
+                    zip(selected_orb_offsets[:-1], selected_orb_offsets[1:])))
+                infalling_lims = np.array(list(
+                    zip(selected_inf_offsets[:-1], selected_inf_offsets[1:])))
+
+        ids_orbiting_u, ind, inv = np.unique(
+            self.ids_orbiting, return_index=True, return_inverse=True)
+        bool_in_snap_u = ~np.in1d(
+            ids_orbiting_u, snapshot_data['ids'], assume_unique=True,
+            invert=True)
+        if not np.all(bool_in_snap_u):
+            ids_orbiting_u = ids_orbiting_u[bool_in_snap_u]
+            bool_in_snap = bool_in_snap_u[inv]
+            inv_u, inv_inv = np.unique(inv[bool_in_snap], return_inverse=True)
+            inv_u = myin1d(np.where(bool_in_snap_u)[0], inv_u)
+            inv = inv_u[inv_inv]
+            self.ids_orbiting_collated = self.ids_orbiting
+            self.ids_orbiting = ids_orbiting_u[inv]
+            if not hasattr(self, 'counts_collated'):
+                self.counts_collated = self.counts
+            self.counts = self.counts[bool_in_snap]
+            new_lens = [
+                np.sum(bool_in_snap[slice(*olim)]) for olim in orbiting_lims]
+            if not hasattr(self, 'orbiting_offsets_collated'):
+                self.orbiting_offsets_collated = self.orbiting_offsets
+            self.orbiting_offsets = np.cumsum([0] + new_lens)
+            orbiting_lims = np.array(list(
+                zip(self.orbiting_offsets[:-1], self.orbiting_offsets[1:])))
+        inds_orbiting = myin1d(snapshot_data['ids'], ids_orbiting_u)
+        inds_orbiting = inds_orbiting[inv]
+        self.coords_orbiting = snapshot_data['coordinates'][inds_orbiting]
+        self.vels_orbiting = snapshot_data['velocities'][inds_orbiting]
+        if mass_is_array:
+            self.masses_orbiting = snapshot_data['masses'][inds_orbiting]
         else:
-            mass_is_array = False
-        counts = np.empty(n_orb)
-        ooff, ioff = 0, 0
-        self.orbiting_slices, self.infalling_slices = [], []
+            self.masses_orbiting = snapshot_data['masses']
+
+        ids_infalling_u, inv = np.unique(
+            self.ids_infalling, return_inverse=True)
+        bool_in_snap_u = ~np.in1d(
+            ids_infalling_u, snapshot_data['ids'], assume_unique=True,
+            invert=True)
+        if not np.all(bool_in_snap_u):
+            ids_infalling_u = ids_infalling_u[bool_in_snap_u]
+            bool_in_snap = bool_in_snap_u[inv]
+            inv_u, inv_inv = np.unique(inv[bool_in_snap], return_inverse=True)
+            inv_u = myin1d(np.where(bool_in_snap_u)[0], inv_u)
+            inv = inv_u[inv_inv]
+            self.ids_infalling_collated = self.ids_infalling
+            self.ids_infalling = ids_infalling_u[inv]
+            new_lens = [
+                np.sum(bool_in_snap[slice(*ilim)]) for ilim in infalling_lims]
+            if not hasattr(self, 'infalling_offsets_collated'):
+                self.infalling_offsets_collated = self.infalling_offsets
+            self.infalling_offsets = np.cumsum([0] + new_lens)
+            infalling_lims = np.array(list(
+                zip(self.infalling_offsets[:-1], self.infalling_offsets[1:])))
+        inds_infalling = myin1d(snapshot_data['ids'], ids_infalling_u)
+        inds_infalling = inds_infalling[inv]
+        self.coords_infalling = snapshot_data['coordinates'][inds_infalling]
+        self.vels_infalling = snapshot_data['velocities'][inds_infalling]
+        if mass_is_array:
+            self.masses_infalling = snapshot_data['masses'][inds_infalling]
+        else:
+            self.masses_infalling = snapshot_data['masses']
+
         for olim, ilim, region_position, bulk_velocity in zip(
                 orbiting_lims, infalling_lims, region_positions,
                 bulk_velocities):
-            osl, isl = slice(*olim), slice(*ilim)
-            orbids = np.intersect1d(
-                snapshot_data['ids'], self.ids_orbiting[osl])
-            inds_contained = myin1d(self.ids_orbiting[osl], orbids)
-            olen_ = len(orbids)
-            osl_ = slice(ooff, ooff+olen_)
-            self.orbiting_slices.append(osl_)
-            ids_orbiting[osl_] = orbids
-            counts[osl_] = self.counts[osl][inds_contained]
 
-            infids = np.intersect1d(
-                snapshot_data['ids'], self.ids_infalling[isl])
-            ilen_ = len(infids)
-            isl_ = slice(ioff, ioff+ilen_)
-            self.infalling_slices.append(isl_)
-            ids_infalling[isl_] = infids
+            self.coords_orbiting[slice(*olim)] = recenter_coordinates(
+                self.coords_orbiting[slice(*olim)] - region_position,
+                self.box_size)
+            self.vels_orbiting[slice(*olim)] = self.vels_orbiting[
+                slice(*olim)] - bulk_velocity
 
-            inds_orbiting = myin1d(snapshot_data['ids'], orbids)
-            if hasattr(self, "box_size"):
-                coords_orbiting[osl_] = recenter_coordinates(
-                    snapshot_data['coordinates'][inds_orbiting] -
-                    region_position, self.box_size)
-            else:
-                coords_orbiting[osl_] = snapshot_data['coordinates'][
-                    inds_orbiting] - region_position
-            vels_orbiting[osl_] = snapshot_data['velocities'][inds_orbiting] -\
-                bulk_velocity
-            if mass_is_array:
-                masses_orbiting[osl_] = snapshot_data['masses'][inds_orbiting]
-            else:
-                masses_orbiting = snapshot_data['masses']
+            self.coords_infalling[slice(*ilim)] = recenter_coordinates(
+                self.coords_infalling[slice(*ilim)] - region_position,
+                self.box_size)
+            self.vels_infalling[slice(*ilim)] = self.vels_infalling[
+                slice(*ilim)] - bulk_velocity
 
-            inds_infalling = myin1d(snapshot_data['ids'], infids)
-            if hasattr(self, "box_size"):
-                coords_infalling[isl_] = recenter_coordinates(
-                    snapshot_data['coordinates'][inds_infalling] -
-                    region_position, self.box_size)
-            else:
-                coords_infalling[isl_] = snapshot_data['coordinates'][
-                    inds_infalling] - region_position
-            vels_infalling[isl_] = snapshot_data['velocities'][inds_infalling]\
-                - bulk_velocity
-            if mass_is_array:
-                masses_infalling[isl_] = snapshot_data['masses'][
-                    inds_infalling]
-            else:
-                masses_infalling = snapshot_data['masses']
-
-            ooff += olen_
-            ioff += ilen_
-
-        self.ids_orbiting = ids_orbiting[:ooff]
-        self.ids_infalling = ids_infalling[:ioff]
-        self.coords_orbiting = coords_orbiting[:ooff]
-        self.coords_infalling = coords_infalling[:ioff]
-        self.vels_orbiting = vels_orbiting[:ooff]
-        self.vels_infalling = vels_infalling[:ioff]
-        if mass_is_array:
-            self.masses_orbiting = masses_orbiting[:ooff]
-            self.masses_infalling = masses_infalling[:ioff]
-        self.counts = counts[:ooff]
+        self.orbiting_slices = [slice(*lims) for lims in orbiting_lims]
+        self.infalling_slices = [slice(*lims) for lims in infalling_lims]
         self.halo_ids_partdata = halo_ids if halo_ids is not None else \
             self.halo_ids_collated
 
@@ -386,7 +456,7 @@ class OrbitDecomposition:
         region_radius = self.region_radii[sind, hind]
 
         if counts_to_plot == 'all':
-            counts_to_plot = np.unique(self.counts)
+            counts_to_plot = np.unique(counts)
 
         clrmap = mpl.colormaps[colormap]
 
