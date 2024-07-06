@@ -281,9 +281,10 @@ class OrbitDecomposition:
             else:
                 mass_is_array = False
 
-        snapshot_data['ids'], inds = np.unique(
+        snap_ids_u, inds = np.unique(
             snapshot_data['ids'], return_index=True)
-        if len(inds) != len(snapshot_data['coordinates']):
+        if len(snap_ids_u) != len(snapshot_data['ids']):
+            snapshot_data['ids'] = snap_ids_u
             if 'coordinates' in snapshot_data:
                 snapshot_data['coordinates'] = snapshot_data['coordinates'][
                     inds]

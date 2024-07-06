@@ -82,9 +82,7 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
     snapshot_numbers = snapshot_numbers[order]
     main_branches = main_branches[order]
 
-    initialize_savefile(
-        savefile, snapshot_numbers[1:], main_branches[1:], verbose)
-
+    istart, started = 0, False
     for i, (halo_ids, snapshot_number) in enumerate(
             zip(main_branches, snapshot_numbers)):
 
@@ -93,6 +91,12 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
             print('Snapshot {}\n'.format('%03d' % snapshot_number))
 
         halo_exists = np.argwhere(halo_ids != -1).flatten()
+        if len(halo_exists) == 0:
+            if started is False:
+                istart = i + 1
+            continue
+        else:
+            started = True
         halo_ids_ = halo_ids[halo_exists]
 
         region_positions, region_radii = regions(
@@ -108,7 +112,13 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
         rhats, radial_vels, bulk_vels = region_frame(
             snapshot, region_slices, region_positions, verbose)
 
-        if i > 0:
+        if i > istart:
+
+            if i == istart + 1:
+
+                initialize_savefile(
+                    savefile, snapshot_numbers[1+istart:],
+                    main_branches[1+istart:], verbose)
 
             progen_inds = myin1d(halo_exists, progen_exists)
             region_slices_desc = region_slices[progen_inds]
@@ -128,7 +138,6 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
                     orbiting_angle_ids, orbiting_angles, orbiting_angle_slices,
                     verbose)
 
-
             region_positions_ = -np.ones((len(halo_ids), 3))
             region_positions_[halo_exists] = region_positions
             region_radii_ = -np.ones(len(halo_ids))
@@ -145,7 +154,7 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
                 entered_offsets, departed_ids, departed_offsets,
                 orbiting_angle_changes, region_positions_, region_radii_,
                 bulk_velocities_, main_branches[-1][progen_exists],
-                snapshot_number, box_size, i-1, verbose)
+                snapshot_number, box_size, i-(1+istart), verbose)
 
             progen_exists_prev = progen_exists
             ids_angle_prev = matched_ids
