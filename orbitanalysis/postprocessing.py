@@ -107,66 +107,78 @@ class OrbitDecomposition:
                 hids = hids[np.argsort(hinds2)]
                 hinds2 = np.sort(hinds2)
 
-                orbiting_lims = list(
-                    zip(sdata['orbiting_offsets'][hinds1],
-                        sdata['orbiting_offsets'][hinds1+1]))
-                orbids = np.concatenate(
-                    [sdata['orbiting_IDs'][slice(*lims)] for lims in
-                     orbiting_lims])
-                angles = np.concatenate(
-                    [sdata['angles'][slice(*lims)] for lims in orbiting_lims])
+                has_orbiting, has_infalling, has_departed = True, True, True
+                if len(sdata['orbiting_offsets']) == 0:
+                    has_orbiting = False
+                if len(sdata['infalling_offsets']) == 0:
+                    has_infalling = False
+                if len(sdata['departed_offsets']) == 0:
+                    has_departed = False
 
-                new_orb_lens = [0] + [
-                    np.diff(lims)[0] for lims in orbiting_lims]
-                new_orb_offsets = np.cumsum(new_orb_lens)
-                new_orb_lims = list(
-                    zip(new_orb_offsets[:-1], new_orb_offsets[1:]))
+                if has_orbiting:
+                    orbiting_lims = list(
+                        zip(sdata['orbiting_offsets'][hinds1],
+                            sdata['orbiting_offsets'][hinds1+1]))
+                    orbids = np.concatenate(
+                        [sdata['orbiting_IDs'][slice(*lims)] for lims in
+                         orbiting_lims])
 
-                angle_bool = np.zeros(len(angles), dtype=bool)
-                angle_inds = np.argwhere(angles > angle_cut).flatten()
-                angle_bool[angle_inds] = True
-                angle_cut_lens = [0] + [
-                    np.sum(angle_bool[slice(*lims)]) for lims in new_orb_lims]
-                angle_cut_offsets = np.cumsum(angle_cut_lens)
-                angle_cut_lims = np.array(list(
-                    zip(angle_cut_offsets[:-1], angle_cut_offsets[1:])))
-                N = len(ids_orbiting)
-                for hind, lim in zip(hinds2, angle_cut_lims):
-                    inds_orbiting[hind] = np.append(
-                        inds_orbiting[hind], np.arange(*(lim+N)))
-                ids_orbiting = np.append(ids_orbiting, orbids[angle_inds])
+                    new_orb_lens = [0] + [
+                        np.diff(lims)[0] for lims in orbiting_lims]
+                    new_orb_offsets = np.cumsum(new_orb_lens)
+                    new_orb_lims = list(
+                        zip(new_orb_offsets[:-1], new_orb_offsets[1:]))
 
-                infalling_lims = list(
-                    zip(sdata['infalling_offsets'][hinds1],
-                        sdata['infalling_offsets'][hinds1+1]))
-                infids = np.concatenate(
-                    [sdata['infalling_IDs'][slice(*lims)] for lims in
-                     infalling_lims])
+                    angles = np.concatenate(
+                        [sdata['angles'][slice(*lims)] for lims in orbiting_lims])
+                    angle_bool = np.zeros(len(angles), dtype=bool)
+                    angle_inds = np.argwhere(angles > angle_cut).flatten()
+                    angle_bool[angle_inds] = True
+                    angle_cut_lens = [0] + [
+                        np.sum(angle_bool[slice(*lims)]) for lims in new_orb_lims]
+                    angle_cut_offsets = np.cumsum(angle_cut_lens)
+                    angle_cut_lims = np.array(list(
+                        zip(angle_cut_offsets[:-1], angle_cut_offsets[1:])))
+                    N = len(ids_orbiting)
+                    for hind, lim in zip(hinds2, angle_cut_lims):
+                        inds_orbiting[hind] = np.append(
+                            inds_orbiting[hind], np.arange(*(lim+N)))
+                    ids_orbiting = np.append(ids_orbiting, orbids[angle_inds])
 
-                new_inf_lens = [0] + [
-                    np.diff(lims)[0] for lims in infalling_lims]
-                new_inf_offsets = np.cumsum(new_inf_lens)
-                new_inf_lims = np.array(list(
-                    zip(new_inf_offsets[:-1], new_inf_offsets[1:])))
-                N = len(ids_infalling)
-                for hind, lim in zip(hinds2, new_inf_lims):
-                    inds_infalling[hind] = np.append(
-                        inds_infalling[hind], np.arange(*(lim+N)))
-                ids_infalling = np.append(ids_infalling, infids)
+                if has_infalling:
 
-                for hind1, hind2, ilims in zip(hinds1, hinds2, new_inf_lims):
-                    ids_returned = np.intersect1d(
-                        ids_departed[hind2], infids[slice(*ilims)])
-                    if len(ids_returned) > 0:
-                        inds_returned = np.where(
-                            np.in1d(ids_departed[hind2], ids_returned))[0]
-                        ids_departed[hind2] = np.delete(
-                            ids_departed[hind2], inds_returned)
+                    infalling_lims = list(
+                        zip(sdata['infalling_offsets'][hinds1],
+                            sdata['infalling_offsets'][hinds1+1]))
+                    infids = np.concatenate(
+                        [sdata['infalling_IDs'][slice(*lims)] for lims in
+                         infalling_lims])
 
-                    departed_lims = sdata['departed_offsets'][hind1:hind1+2]
-                    ids_departed[hind2] = np.append(
-                        ids_departed[hind2], sdata['departed_IDs'][
-                            slice(*departed_lims)])
+                    new_inf_lens = [0] + [
+                        np.diff(lims)[0] for lims in infalling_lims]
+                    new_inf_offsets = np.cumsum(new_inf_lens)
+                    new_inf_lims = np.array(list(
+                        zip(new_inf_offsets[:-1], new_inf_offsets[1:])))
+                    N = len(ids_infalling)
+                    for hind, lim in zip(hinds2, new_inf_lims):
+                        inds_infalling[hind] = np.append(
+                            inds_infalling[hind], np.arange(*(lim+N)))
+                    ids_infalling = np.append(ids_infalling, infids)
+
+                if has_departed:
+                    for hind1, hind2, ilims in zip(hinds1, hinds2, new_inf_lims):
+                        ids_returned = np.intersect1d(
+                            ids_departed[hind2], infids[slice(*ilims)])
+                        if len(ids_returned) > 0:
+                            inds_returned = np.where(
+                                np.in1d(ids_departed[hind2], ids_returned))[0]
+                            ids_departed[hind2] = np.delete(
+                                ids_departed[hind2], inds_returned)
+
+                        departed_lims = sdata['departed_offsets'][hind1:hind1+2]
+                        ids_departed[hind2] = np.append(
+                            ids_departed[hind2], sdata['departed_IDs'][
+                                slice(*departed_lims)])
 
             if savefile is not None:
 

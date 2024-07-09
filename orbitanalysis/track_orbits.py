@@ -112,13 +112,18 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
         rhats, radial_vels, bulk_vels = region_frame(
             snapshot, region_slices, region_positions, verbose)
 
+        region_positions_ = -np.ones((len(halo_ids), 3))
+        region_positions_[halo_exists] = region_positions
+        region_radii_ = -np.ones(len(halo_ids))
+        region_radii_[halo_exists] = region_radii
+        bulk_velocities_ = -np.ones((len(halo_ids), 3))
+        bulk_velocities_[halo_exists] = bulk_vels
+        if 'box_size' in snapshot:
+            box_size = snapshot['box_size']
+        else:
+            box_size = None
+
         if i > istart:
-
-            if i == istart + 1:
-
-                initialize_savefile(
-                    savefile, snapshot_numbers[1+istart:],
-                    main_branches[1+istart:], verbose)
 
             progen_inds = myin1d(halo_exists, progen_exists)
             region_slices_desc = region_slices[progen_inds]
@@ -138,29 +143,29 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
                     orbiting_angle_ids, orbiting_angles, orbiting_angle_slices,
                     verbose)
 
-            region_positions_ = -np.ones((len(halo_ids), 3))
-            region_positions_[halo_exists] = region_positions
-            region_radii_ = -np.ones(len(halo_ids))
-            region_radii_[halo_exists] = region_radii
-            bulk_velocities_ = -np.ones((len(halo_ids), 3))
-            bulk_velocities_[halo_exists] = bulk_vels
-            if 'box_size' in snapshot:
-                box_size = snapshot['box_size']
-            else:
-                box_size = None
-
             save_to_file(
                 savefile, orbiting_ids, orbiting_offsets, entered_ids,
                 entered_offsets, departed_ids, departed_offsets,
                 orbiting_angle_changes, region_positions_, region_radii_,
                 bulk_velocities_, main_branches[-1][progen_exists],
-                snapshot_number, box_size, i-(1+istart), verbose)
+                snapshot_number, box_size, i-istart, verbose)
 
             progen_exists_prev = progen_exists
             ids_angle_prev = matched_ids
             angle_slices_prev = matched_slices
 
         else:
+
+            initialize_savefile(
+                savefile, snapshot_numbers[istart:],
+                main_branches[istart:], verbose)
+
+            save_to_file(
+                savefile, np.array([]), np.array([]), snapshot['ids'],
+                region_offsets, np.array([]), np.array([]),
+                np.array([]), region_positions_, region_radii_,
+                bulk_velocities_, main_branches[-1][halo_exists],
+                snapshot_number, box_size, i-istart, verbose)
 
             progen_exists_prev = np.array([])
             ids_angle_prev = np.array([])
