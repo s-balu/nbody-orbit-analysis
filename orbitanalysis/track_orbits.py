@@ -95,8 +95,6 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
             if started is False:
                 istart = i + 1
             continue
-        else:
-            started = True
         halo_ids_ = halo_ids[halo_exists]
 
         region_positions, region_radii = regions(
@@ -104,6 +102,12 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
 
         snapshot = load_snapshot_data(
             snapshot_number, region_positions, region_radii)
+        if len(snapshot['coordinates']) == 0:
+            if started is False:
+                istart = i + 1
+            continue
+        else:
+            started = True
         region_offsets = list(snapshot['region_offsets']) + [
             len(snapshot['ids'])]
         region_slices = np.array(
