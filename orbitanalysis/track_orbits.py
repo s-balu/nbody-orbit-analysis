@@ -469,7 +469,7 @@ def save_to_file(savefile, ids_dict, angles, region_positions, region_radii,
         gsnap.create_dataset(
             'orbiting_offsets', data=ids_dict['orbiting_offsets'])
         gsnap.create_dataset('orbiting_IDs', data=ids_dict['orbiting_ids'])
-        gsnap.create_dataset('angles', data=angles)
+        gsnap.create_dataset('angles', data=angles.astype(np.float16))
 
         gsnap.create_dataset(
             'infalling_offsets', data=ids_dict['entered_offsets'])
