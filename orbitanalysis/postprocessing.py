@@ -271,7 +271,7 @@ class OrbitDecomposition:
                 hf.create_dataset('halo_IDs', data=halo_ids)
 
             if save_final_counts:
-                self.save_final_orbit_counts(savefile, verbose)
+                self.save_final_orbit_counts(savefile, verbose=verbose)
 
         self.halo_offsets = np.cumsum([0] + [len(x) for x in ids_])
         self.particle_ids = np.concatenate(ids_)
@@ -423,25 +423,29 @@ class OrbitDecomposition:
             offsets_all_final = hf[skey_final]['halo_offsets'][:]
             slices_all_final = np.array(
                 list(zip(offsets_all_final[:-1], offsets_all_final[1:])))
-            halo_ids_final = hf[skey_final]['halo_IDs_final'][:]
-            
+
             skeys = np.array(list(hf.keys())[1:-1])
-            snap_nums_from_file = np.array(
-                [int(skey.split('_')[1]) for skey in skeys])
-            snap_inds = np.where(np.in1d(
-                snap_nums_from_file, np.asarray(snapshot_numbers)))
-            for skey in skeys[snap_inds]:
+            if snapshot_numbers is not None:
+                snap_nums_from_file = np.array(
+                    [int(skey.split('_')[1]) for skey in skeys])
+                snap_inds = np.where(np.in1d(
+                    snap_nums_from_file, np.asarray(snapshot_numbers)))
+                skeys = skeys[snap_inds]
+
+            for skey in skeys:
 
                 counts_all = hf[skey]['orbit_counts'][:]
                 ids_all = hf[skey]['particle_IDs'][:]
                 offsets_all = hf[skey]['halo_offsets'][:]
-                slices_all = list(zip(offsets_all[:-1], offsets_all[1:]))
+                slices_all = np.array(
+                    list(zip(offsets_all[:-1], offsets_all[1:])))
                 halo_ids = hf[skey]['halo_IDs_final'][:]
 
                 counts_retro_all = np.empty(len(counts_all), dtype=np.int16)
 
-                inds_final = myin1d(halo_ids_final, halo_ids)
-                for slf, sl in zip(slices_all_final[inds_final], slices_all):
+                slinds = myin1d(hf['halo_IDs'][:], halo_ids)
+                for slf, sl in zip(
+                        slices_all_final[slinds], slices_all[slinds]):
                     
                     ids_final = ids_all_final[slice(*slf)]
                     counts_final = counts_all_final[slice(*slf)]
