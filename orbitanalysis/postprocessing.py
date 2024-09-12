@@ -14,11 +14,28 @@ class OrbitDecomposition:
         self.filename = filename
 
         with h5py.File(filename, 'r') as datafile:
-            self.main_branches = datafile['main_branches'][:]
-            self.region_positions = datafile['region_positions'][:]
-            self.region_radii = datafile['region_radii'][:]
-            self.bulk_velocities = datafile['bulk_velocities'][:]
-            self.snapshot_numbers = datafile['snapshot_numbers'][:]
+
+            self.main_branches = []
+            self.region_positions = []
+            self.region_radii = []
+            self.bulk_velocities = []
+            self.snapshot_numbers = []
+
+            for skey in list(datafile.keys()):
+
+                ds = datafile[skey]
+                self.main_branches.append(ds['halo_ids'][:])
+                self.region_positions.append(ds['region_positions'][:])
+                self.region_radii.append(ds['region_radii'][:])
+                self.bulk_velocities.append(ds['bulk_velocities'][:])
+                self.snapshot_numbers.append(int(skey.split('_')[1]))
+            
+            self.main_branches = np.array(self.main_branches)
+            self.region_positions = np.array(self.region_positions)
+            self.region_radii = np.array(self.region_radii)
+            self.bulk_velocities = np.array(self.bulk_velocities)
+            self.snapshot_numbers = np.array(self.snapshot_numbers)
+
             if 'box_size' in datafile.attrs:
                 self.box_size = datafile.attrs['box_size']
 
