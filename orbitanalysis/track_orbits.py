@@ -540,7 +540,6 @@ def save_to_file(savefile, ids_dict, angles_dict, region_positions, region_radii
         gsnap.create_dataset('region_positions', data=region_positions)
         gsnap.create_dataset('bulk_velocities', data=bulk_velocities)
 
-
     if checkpoint:
 
         with h5py.File(savefile+'.checkpoint', 'w') as hf:
