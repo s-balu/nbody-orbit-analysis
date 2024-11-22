@@ -109,7 +109,7 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
             continue
         halo_ids_ = halo_ids[halo_exists]
 
-        region_positions, region_radii = regions(
+        region_positions, region_radii, bulk_vels = regions(
             snapshot_number, halo_ids_)
 
         snapshot = load_snapshot_data(
@@ -126,7 +126,7 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
             list(zip(region_offsets[:-1], region_offsets[1:])))
 
         rhats, radial_vels, bulk_vels = region_frame(
-            snapshot, region_slices, region_positions, verbose)
+            snapshot, region_slices, region_positions, bulk_vels, verbose)
 
         region_positions_ = -np.ones((len(halo_ids), 3))
         region_positions_[halo_exists] = region_positions
@@ -199,7 +199,8 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
             time.time() - tstart))
 
 
-def region_frame(snapshot, region_slices, region_positions, verbose):
+def region_frame(snapshot, region_slices, region_positions, region_bulk_vels,
+                 verbose):
 
     """
     Transform coordinates and velocities to region frames and compute radial
@@ -221,22 +222,29 @@ def region_frame(snapshot, region_slices, region_positions, verbose):
                 slice(*sl)] - pos
 
     region_vels = np.empty(np.shape(snapshot['velocities']))
-    region_bulk_vels = []
+    if region_bulk_vels is None:
+        region_bulk_vels = []
     if isinstance(snapshot['masses'], np.ndarray):
-        for sl in region_slices:
-            bulk_vel = np.sum(
-                snapshot['masses'][slice(*sl)][:, np.newaxis] *
-                snapshot['velocities'][slice(*sl)], axis=0) / \
-                       np.sum(snapshot['masses'][slice(*sl)])
+        for i, sl in enumerate(region_slices):
+            if region_bulk_vels is None:
+                bulk_vel = np.sum(
+                    snapshot['masses'][slice(*sl)][:, np.newaxis] *
+                    snapshot['velocities'][slice(*sl)], axis=0) / \
+                        np.sum(snapshot['masses'][slice(*sl)])
+                region_bulk_vels.append(bulk_vel)
+            else:
+                bulk_vel = region_bulk_vels[i]
             region_vels[slice(*sl), :] = snapshot['velocities'][slice(*sl)] - \
                 bulk_vel
-            region_bulk_vels.append(bulk_vel)
     else:
-        for sl in region_slices:
-            bulk_vel = np.mean(snapshot['velocities'][slice(*sl)], axis=0)
+        for i, sl in enumerate(region_slices):
+            if region_bulk_vels is None:
+                bulk_vel = np.mean(snapshot['velocities'][slice(*sl)], axis=0)
+                region_bulk_vels.append(bulk_vel)
+            else:
+                bulk_vel = region_bulk_vels[i]
             region_vels[slice(*sl), :] = snapshot['velocities'][slice(*sl)] - \
                 bulk_vel
-            region_bulk_vels.append(bulk_vel)
 
     rads = np.sqrt(np.einsum('...i,...i', region_coords, region_coords))
     rhats = region_coords / rads[:, np.newaxis]
