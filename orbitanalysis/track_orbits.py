@@ -223,10 +223,13 @@ def region_frame(snapshot, region_slices, region_positions, region_bulk_vels,
 
     region_vels = np.empty(np.shape(snapshot['velocities']))
     if region_bulk_vels is None:
+        region_bulk_vels_cat = False
         region_bulk_vels = []
+    else:
+        region_bulk_vels_cat = True
     if isinstance(snapshot['masses'], np.ndarray):
         for i, sl in enumerate(region_slices):
-            if region_bulk_vels is None:
+            if not region_bulk_vels_cat:
                 bulk_vel = np.sum(
                     snapshot['masses'][slice(*sl)][:, np.newaxis] *
                     snapshot['velocities'][slice(*sl)], axis=0) / \
@@ -238,7 +241,7 @@ def region_frame(snapshot, region_slices, region_positions, region_bulk_vels,
                 bulk_vel
     else:
         for i, sl in enumerate(region_slices):
-            if region_bulk_vels is None:
+            if not region_bulk_vels_cat:
                 bulk_vel = np.mean(snapshot['velocities'][slice(*sl)], axis=0)
                 region_bulk_vels.append(bulk_vel)
             else:
