@@ -31,3 +31,9 @@ def recenter_coordinates(position, boxsize):
         position[np.argwhere((position[:, dim] > bs/2)), dim] -= bs
         position[np.argwhere((position[:, dim] < -bs/2)), dim] += bs
     return position
+
+
+def hubble_parameter(z, H0, Omega_m, Omega_L, Omega_k=0):
+    return H0 * np.sqrt(Omega_m * (1 + z)**3 +
+                        Omega_k * (1 + z)**2 +
+                        Omega_L)

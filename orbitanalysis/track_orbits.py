@@ -2,7 +2,7 @@ import numpy as np
 import time
 import h5py
 
-from orbitanalysis.utils import myin1d, recenter_coordinates
+from orbitanalysis.utils import myin1d, recenter_coordinates, hubble_parameter
 
 
 def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
@@ -52,6 +52,12 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
                            each region block.
         * box_size : float or (3,) array_like - the simulation box side
                      length(s) when using a periodic box (optional).
+        * redshift : float - the redshift of the snapshot.
+        * H0 : float - the Hubble parameter at z = 0.
+        * Omega_m : float - the matter density parameter.
+        * Omega_L : float - the dark energy density parameter.
+        * Omega_k : float (optional) - the curvature density parameter. If not
+                    provided, Omega_k = 0 will be assumed.
     savefile : str
         The filename at which to save the result of the orbit tracking. The
         data is saved in HDF5 format.
@@ -221,6 +227,11 @@ def region_frame(snapshot, region_slices, region_positions, region_bulk_vels,
             region_coords[slice(*sl), :] = snapshot['coordinates'][
                 slice(*sl)] - pos
 
+    if 'Omega_k' not in snapshot:
+        snapshot['Omega_k'] = 0
+    H = hubble_parameter(
+        snapshot['redshift'], snapshot['H0'], snapshot['Omega_m'],
+        snapshot['Omega_L'], snapshot['Omega_k'])
     region_vels = np.empty(np.shape(snapshot['velocities']))
     if region_bulk_vels is None:
         region_bulk_vels_cat = False
@@ -238,7 +249,8 @@ def region_frame(snapshot, region_slices, region_positions, region_bulk_vels,
             else:
                 bulk_vel = region_bulk_vels[i]
             region_vels[slice(*sl), :] = snapshot['velocities'][slice(*sl)] - \
-                bulk_vel
+                bulk_vel + H * region_coords[slice(*sl), :] / \
+                    (1 + snapshot['redshift'])
     else:
         for i, sl in enumerate(region_slices):
             if not region_bulk_vels_cat:
@@ -247,7 +259,8 @@ def region_frame(snapshot, region_slices, region_positions, region_bulk_vels,
             else:
                 bulk_vel = region_bulk_vels[i]
             region_vels[slice(*sl), :] = snapshot['velocities'][slice(*sl)] - \
-                bulk_vel
+                bulk_vel + H * region_coords[slice(*sl), :] / \
+                    (1 + snapshot['redshift'])
 
     rads = np.sqrt(np.einsum('...i,...i', region_coords, region_coords))
     rhats = region_coords / rads[:, np.newaxis]
@@ -519,9 +532,9 @@ def initialize_savefile(savefile, mode, box_size, verbose):
         print('Savefile initialized\n')
 
 
-def save_to_file(savefile, ids_dict, angles_dict, region_positions, region_radii,
-                 bulk_velocities, halo_ids, halo_ids_final, snapshot_number,
-                 checkpoint, verbose):
+def save_to_file(savefile, ids_dict, angles_dict, region_positions,
+                 region_radii, bulk_velocities, halo_ids, halo_ids_final,
+                 snapshot_number, checkpoint, verbose):
 
     if verbose:
         print('Saving to file...')
