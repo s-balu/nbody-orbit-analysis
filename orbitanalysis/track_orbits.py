@@ -184,12 +184,17 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
             
             return rhs, radial_vels, bulk_vels, angs, None, None
     
+        if verbose:
+            t0 = time.time()
         if npool is None:
             result = []
             for idx in range(len(halo_exists)):
                 result.append(track(idx))
         else:
             result = Pool(npool).map(track, np.arange(len(halo_exists)))
+        if verbose:
+            print('Finished pericenter detection for snapshot {} in {} s\n'.\
+                  format('%03d' % snapshot_number, time.time() - tstart))
 
         rhats, radial_velocities, bulk_velocities, angles = [], [], [], []
         apsis_ids, apsis_angles = [], []
@@ -238,8 +243,8 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
         progen_exists = halo_exists
 
     if verbose:
-        print('Finished pericenter detection (took {} s)\n'.format(
-            time.time() - tstart))
+        print('Finished pericenter detection for all snapshots in {} s\n'.\
+              format(time.time() - tstart))
 
 
 def region_frame(snapshot, region_slice, region_position, region_bulk_vel, H):
@@ -391,4 +396,4 @@ def save_to_file(savefile, apsis_ids, apsis_offsets, apsis_angles,
             hf.create_dataset('angles', data=angles)
 
     if verbose:
-        print('Saved to file (took {} s)\n'.format(time.time() - t0))
+        print('Saved to file ({} s)\n'.format(time.time() - t0))
