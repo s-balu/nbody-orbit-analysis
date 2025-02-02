@@ -194,7 +194,7 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
             result = Pool(npool).map(track, np.arange(len(halo_exists)))
         if verbose:
             print('Finished pericenter detection for snapshot {} in {} s\n'.\
-                  format('%03d' % snapshot_number, time.time() - tstart))
+                  format('%03d' % snapshot_number, time.time() - t0))
 
         rhats, radial_velocities, bulk_velocities, angles = [], [], [], []
         apsis_ids, apsis_angles = [], []
