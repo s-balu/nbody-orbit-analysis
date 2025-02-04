@@ -5,38 +5,27 @@ import time
 from orbitanalysis.utils import myin1d
 
 
-class OrbitDecomposition:
+class Apsides:
 
     def __init__(self, filename):
 
         self.filename = filename
+        snapshot_numbers = []
 
-        with h5py.File(filename, 'r') as datafile:
+        with h5py.File(filename, 'r') as hf:
 
-            self.main_branches = []
-            self.region_positions = []
-            self.region_radii = []
-            self.bulk_velocities = []
-            self.snapshot_numbers = []
+            skeys = list(hf.keys())
+            for skey in skeys:
 
-            for skey in list(datafile.keys()):
+                snapshot_numbers.append(int(skey.split('_')[1]))
 
-                ds = datafile[skey]
-                self.main_branches.append(ds['halo_ids'][:])
-                self.region_positions.append(ds['region_positions'][:])
-                self.region_radii.append(ds['region_radii'][:])
-                self.bulk_velocities.append(ds['bulk_velocities'][:])
-                self.snapshot_numbers.append(int(skey.split('_')[1]))
-            
-            self.main_branches = np.array(self.main_branches)
-            self.region_positions = np.array(self.region_positions)
-            self.region_radii = np.array(self.region_radii)
-            self.bulk_velocities = np.array(self.bulk_velocities)
-            self.snapshot_numbers = np.array(self.snapshot_numbers)
+            self.final_halo_ids = hf[skeys[-1]]['halo_IDs'][:]
 
-            self.mode = datafile.attrs['mode']
-            if 'box_size' in datafile.attrs:
-                self.box_size = datafile.attrs['box_size']
+            self.mode = hf.attrs['mode']
+            if 'box_size' in hf.attrs:
+                self.box_size = hf.attrs['box_size']
+
+        self.snapshot_numbers = np.array(snapshot_numbers)
 
     def collate_apsides(self, halo_ids=None, snapshot_number=None,
                         angle_cut=np.pi/4, save_final_counts=False,
@@ -76,7 +65,7 @@ class OrbitDecomposition:
             t_start = time.time()
 
         if halo_ids is None:
-            halo_ids = self.main_branches[-1]
+            halo_ids = self.final_halo_ids
         else:
             if len(np.intersect1d(self.main_branches[-1], halo_ids)) < len(
                     halo_ids):
@@ -100,7 +89,11 @@ class OrbitDecomposition:
             with h5py.File(self.filename, 'r') as hf:
 
                 hfs = hf['snapshot_{}'.format('%0.3d' % s)]
-                halo_ids_final = hfs['halo_ids_final'][:]
+                halo_ids_current = hfs['halo_IDs'][:]
+                if s != self.snapshot_numbers[-1]:
+                    halo_ids_final = hfs['final_descendant_IDs'][:]
+                else:
+                    halo_ids_final = halo_ids_current
                 common = np.intersect1d(halo_ids_final, halo_ids)
                 hinds1 = myin1d(halo_ids_final, common)
                 hinds2 = myin1d(halo_ids, common)
@@ -142,6 +135,8 @@ class OrbitDecomposition:
             counts = np.concatenate(counts)
             offsets = np.cumsum([0]+lens)[:-1]
 
+            final_halo_ids = halo_ids_final[hinds1] if s != \
+                self.snapshot_numbers[-1] else None
             with h5py.File(savefile, 'a') as hf:
 
                 hfs = hf.create_group('snapshot_{}'.format('%03d' % s))
@@ -149,7 +144,10 @@ class OrbitDecomposition:
                 hfs.create_dataset(
                     '{}er_counts'.format(self.mode[:-3]), data=counts)
                 hfs.create_dataset('halo_offsets', data=offsets)
-                hfs.create_dataset('halo_IDs_final', data=halo_ids[hinds2])
+                if final_halo_ids is not None:
+                    hfs.create_dataset(
+                        'final_descendant_IDs', data=final_halo_ids)
+                hfs.create_dataset('halo_IDs', data=halo_ids_current[hinds1])
 
             if verbose:
                 print('Snapshot {} collated'.format('%03d' % s))

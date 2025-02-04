@@ -216,18 +216,15 @@ def track_orbits(snapshot_numbers, main_branches, regions, load_snapshot_data,
             apsis_ids = np.concatenate(apsis_ids)
             apsis_angles = np.concatenate(apsis_angles)
 
-            region_positions_ = -np.ones((len(halo_ids), 3))
-            region_positions_[halo_exists] = region_positions
-            region_radii_ = -np.ones(len(halo_ids))
-            region_radii_[halo_exists] = region_radii
-            bulk_velocities_ = -np.ones((len(halo_ids), 3))
-            bulk_velocities_[halo_exists] = np.array(bulk_velocities)
-
+            hinds = np.where(np.in1d(halo_exists, progen_exists))[0]
+            halo_ids_final = main_branches[-1][progen_exists] if \
+                snapshot_number != snapshot_numbers[-1] else None
             save_to_file(
                 savefile, apsis_ids, apsis_offsets, apsis_angles,
-                region_positions_, region_radii_, bulk_velocities_, halo_ids,
-                main_branches[-1][progen_exists], snapshot_number, mode,
-                checkpoint, angles, verbose)
+                region_positions[hinds], region_radii[hinds],
+                np.array(bulk_velocities)[hinds], halo_ids_[hinds],
+                halo_ids_final, snapshot_number, mode, checkpoint, angles,
+                verbose)
         
         else:
             if resume:
@@ -383,8 +380,9 @@ def save_to_file(savefile, apsis_ids, apsis_offsets, apsis_angles,
         gsnap.create_dataset('{}er_IDs'.format(mode[:-3]), data=apsis_ids)
         gsnap.create_dataset('angles', data=apsis_angles)
 
-        gsnap.create_dataset('halo_ids', data=halo_ids)
-        gsnap.create_dataset('halo_ids_final', data=halo_ids_final)
+        gsnap.create_dataset('halo_IDs', data=halo_ids)
+        if halo_ids_final is not None:
+            gsnap.create_dataset('final_descendant_IDs', data=halo_ids_final)
         gsnap.create_dataset('region_radii', data=region_radii)
         gsnap.create_dataset('region_positions', data=region_positions)
         gsnap.create_dataset('bulk_velocities', data=bulk_velocities)
