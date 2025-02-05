@@ -89,6 +89,11 @@ class Apsides:
             with h5py.File(self.filename, 'r') as hf:
 
                 hfs = hf['snapshot_{}'.format('%0.3d' % s)]
+
+                region_positions = hfs['region_positions'][:]
+                region_radii = hfs['region_radii'][:]
+                bulk_velocities = hfs['bulk_velocities'][:]
+                
                 halo_ids_current = hfs['halo_IDs'][:]
                 if s != self.snapshot_numbers[-1]:
                     halo_ids_final = hfs['final_descendant_IDs'][:]
@@ -126,11 +131,12 @@ class Apsides:
                     continue
 
             orbiting_ids_unique, counts, lens = [], [], []
-            for oids in orbiting_ids:
+            for i, oids in enumerate(orbiting_ids):
                 oids_u, c = np.unique(oids, return_counts=True)
                 orbiting_ids_unique.append(oids_u)
                 counts.append(c)
-                lens.append(len(oids_u))
+                if i in hinds2:
+                    lens.append(len(oids_u))
             orbiting_ids_unique = np.concatenate(orbiting_ids_unique)
             counts = np.concatenate(counts)
             offsets = np.cumsum([0]+lens)[:-1]
@@ -148,6 +154,12 @@ class Apsides:
                     hfs.create_dataset(
                         'final_descendant_IDs', data=final_halo_ids)
                 hfs.create_dataset('halo_IDs', data=halo_ids_current[hinds1])
+                hfs.create_dataset(
+                    'halo_positions', data=region_positions[hinds1])
+                hfs.create_dataset(
+                    'halo_velocities', data=bulk_velocities[hinds1])
+                hfs.create_dataset(
+                    'region_radii', data=region_radii[hinds1])
 
             if verbose:
                 print('Snapshot {} collated'.format('%03d' % s))
@@ -187,7 +199,11 @@ class Apsides:
             ids_final = hf[skeys[-1]]['particle_IDs'][:]
             counts_final = hf[skeys[-1]][
                 '{}er_counts'.format(self.mode[:-3])][:]
-            
+            halo_ids = hf[skeys[-1]]['halo_IDs'][:]
+            offsets_final = list(
+                hf[skeys[-1]]['halo_offsets'][:]) + [len(ids_final)]
+            slices_final = list(zip(offsets_final[:-1], offsets_final[1:]))
+
             if snapshot_numbers is None:
                 skeys_ = skeys[:-1]
             else:
@@ -199,11 +215,25 @@ class Apsides:
             for skey in skeys_:
 
                 ids = hf[skey]['particle_IDs'][:]
-                final_inds = myin1d(ids_final, ids)
+                desc_ids = hf[skey]['final_descendant_IDs'][:]
+                offsets = list(hf[skey]['halo_offsets'][:]) + [len(ids)]
+                slices = list(zip(offsets[:-1], offsets[1:]))
+
+                hinds = myin1d(halo_ids, desc_ids)
+
+                counts_retro = np.empty(len(ids))
+                for hind2, hind1 in enumerate(hinds):
+                    
+                    final_inds = myin1d(
+                        ids_final[slice(*slices_final[hind1])],
+                        ids[slice(*slices[hind2])])
+                    
+                    counts_retro[slice(*slices[hind2])] = counts_final[
+                        slice(*slices_final[hind1])][final_inds]
 
                 hf[skey].create_dataset(
                     '{}er_counts_final'.format(self.mode[:-3]),
-                    data=counts_final[final_inds])
+                    data=counts_retro)
 
                 if verbose:
                     print('Final counts saved for {} {}'.format(
