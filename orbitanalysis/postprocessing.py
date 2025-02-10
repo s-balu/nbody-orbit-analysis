@@ -67,10 +67,10 @@ class Apsides:
         if halo_ids is None:
             halo_ids = self.final_halo_ids
         else:
-            if len(np.intersect1d(self.main_branches[-1], halo_ids)) < len(
+            if len(np.intersect1d(self.final_halo_ids, halo_ids)) < len(
                     halo_ids):
                 self.missing_halo_ids = np.setdiff1d(
-                    halo_ids, self.main_branches[-1])
+                    halo_ids, self.final_halo_ids)
                 raise ValueError(
                     "The input halo ID list contains IDs of halos (at z=0) "
                     "that have not been processed. Refer to the final row of " 
